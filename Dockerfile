@@ -3,12 +3,9 @@ FROM node:20-alpine AS build
 RUN npm install -g pnpm 
 WORKDIR /app
 
-# 👇 AÑADIR ESTO
+# AÑADIR ESTO
 ARG APP_URL
 ARG PUBLIC_URL
-
-ENV APP_URL=$APP_URL
-ENV PUBLIC_URL=$PUBLIC_URL
 
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./ 
 COPY vite.*.ts ./ 
@@ -39,5 +36,6 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0 
 ENV PORT=3000
 ENV PUBLIC_URL=https://builder.recomiend.app
+ENV APP_URL=https://builder.recomiend.app
 
 CMD ["/app/start.sh"]
