@@ -16,7 +16,7 @@ fi
 # (2) Migraciones (PRODUCCIÓN)
 echo "Running database migrations (deploy mode)"
 pnpm --filter=@webstudio-is/prisma-client generate
-pnpm --filter=./packages/prisma-client prisma migrate deploy --schema ../../apps/builder/prisma/schema.prisma
+pnpm --filter=./packages/prisma-client migrations --dev --cwd ../../apps/builder
 
 # (2) Détecter l'entry serveur Remix : - priorité: build/server/**/index.js (Remix v2) - fallback: build/index.js (anciens templates)
 SSR_ENTRY=""

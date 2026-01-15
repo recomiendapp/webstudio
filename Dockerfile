@@ -36,6 +36,16 @@ FROM node:20-alpine
 RUN npm install -g pnpm 
 WORKDIR /app 
 COPY --from=build /app ./ 
+RUN apk add --no-cache \
+    bash \
+    libc6-compat \
+    openssl \
+    openssl-dev \
+    curl \
+    git \
+    make \
+    g++ \
+    python3
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 ENV NODE_ENV=production 
