@@ -3,9 +3,9 @@ services:
   image: postgres:16-alpine
   container_name: webstudio-postgres
   environment:
-   POSTGRES_USER: ${POSTGRES_USER}
-   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-   POSTGRES_DB: ${POSTGRES_DB}
+   POSTGRES_USER: '${POSTGRES_USER}'
+   POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}'
+   POSTGRES_DB: '${POSTGRES_DB}'
   volumes:
    - postgres_data:/var/lib/postgresql/data
   ports:
@@ -29,24 +29,24 @@ services:
     condition: service_healthy
   restart: always
   environment:
-      APP_URL: ${APP_URL}
-      PUBLIC_URL: ${PUBLIC_URL}
-      DATABASE_URL: ${DATABASE_URL}
-      DIRECT_URL: ${DIRECT_URL}
-      PUBLIC_URL: ${PUBLIC_URL}
-      DEV_LOGIN: ${DEV_LOGIN}
-      AUTH_SECRET: ${AUTH_SECRET}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-      POSTGREST_API_KEY: ${POSTGREST_API_KEY}
-      FEATURES: ${FEATURES}
-      USER_PLAN: ${USER_PLAN}
-      MAX_ASSETS_PER_PROJECT: ${MAX_ASSETS_PER_PROJECT}
-      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE}
-      PUBLISHER_HOST: ${PUBLISHER_HOST}
-      PUBLISHER_ENDPOINT: ${PUBLISHER_ENDPOINT}
+      APP_URL: '${APP_URL}'
+      PUBLIC_URL: '${PUBLIC_URL}'
+      DATABASE_URL: '${DATABASE_URL}'
+      DIRECT_URL: '${DIRECT_URL}'
+      PUBLIC_URL: '${PUBLIC_URL}'
+      DEV_LOGIN: '${DEV_LOGIN}'
+      AUTH_SECRET: '${AUTH_SECRET}'
+      GOOGLE_CLIENT_ID: '${GOOGLE_CLIENT_ID}'
+      GOOGLE_CLIENT_SECRET: '${GOOGLE_CLIENT_SECRET}'
+      POSTGREST_API_KEY: '${POSTGREST_API_KEY}'
+      FEATURES: '${FEATURES}'
+      USER_PLAN: '${USER_PLAN}'
+      MAX_ASSETS_PER_PROJECT: '${MAX_ASSETS_PER_PROJECT}'
+      MAX_UPLOAD_SIZE: '${MAX_UPLOAD_SIZE}'
+      PUBLISHER_HOST: '${PUBLISHER_HOST}'
+      PUBLISHER_ENDPOINT: '${PUBLISHER_ENDPOINT}'
       # PUBLISHER_TOKEN: ${PUBLISHER_TOKEN}
-      BUILD_ORIGIN: ${BUILD_ORIGIN}
+      BUILD_ORIGIN: '${BUILD_ORIGIN}'
  postgrest:
   image: postgrest/postgrest:v12.2.0
   container_name: webstudio-postgrest
@@ -55,12 +55,12 @@ services:
       condition: service_healthy
   restart: always
   environment:
-      PGRST_DB_URI: ${PGRST_DB_URI}
+      PGRST_DB_URI: '${PGRST_DB_URI}'
       PGRST_DB_SCHEMAS: public
-      PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE}
-      PGRST_JWT_SECRET: ${PGRST_JWT_SECRET}
+      PGRST_DB_ANON_ROLE: '${PGRST_DB_ANON_ROLE}'
+      PGRST_JWT_SECRET: '${PGRST_JWT_SECRET}'
       PGRST_DB_USE_LEGACY_GUCS: "false"
-      PGRST_APP_SETTINGS_JWT_SECRET: ${PGRST_APP_SETTINGS_JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_SECRET: '${PGRST_APP_SETTINGS_JWT_SECRET}'
       PGRST_DB_POOL: "10"
       PGRST_DB_POOL_ACQUISITION_TIMEOUT: "10"
   healthcheck:
