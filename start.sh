@@ -13,6 +13,12 @@ if [ ! -d "${BUILD_DIR}" ] || [ -z "$(ls -A "${BUILD_DIR}" 2>/dev/null)" ]; then
   pnpm -r --filter "${WS_NAME}..." run build 
 fi
 
+# (2) Migraciones Prisma (PRODUCCIÓN)
+echo "Running database migrations (deploy mode)"
+pnpm --filter=@webstudio-is/prisma-client generate
+pnpm --filter=./packages/prisma-client migrations --deploy --cwd ../../apps/builder
+
+
 # (2) Détecter l'entry serveur Remix : - priorité: build/server/**/index.js (Remix v2) - fallback: build/index.js (anciens templates)
 SSR_ENTRY=""
 if [ -f "${BUILD_DIR}/server/index.js" ]; then 
