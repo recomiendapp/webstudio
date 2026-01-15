@@ -30,6 +30,9 @@ services:
     condition: service_healthy
   restart: always
   environment:
+      APP_URL: ${APP_URL}
+      DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT}
+      DEPLOYMENT_URL: ${DEPLOYMENT_URL}
       DATABASE_URL: ${DATABASE_URL}
       DIRECT_URL: ${DIRECT_URL}
       PUBLIC_URL: ${PUBLIC_URL}
