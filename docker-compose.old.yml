@@ -1,0 +1,60 @@
+services:
+ postgres:
+  image: postgres:16-alpine
+  container_name: webstudio-postgres
+  environment:
+   - POSTGRES_USER=webstudio
+   - POSTGRES_PASSWORD=tg66ZoOnBAxPM1HNFK
+   - POSTGRES_DB=webstudio
+  volumes:
+   - postgres_data:/var/lib/postgresql/data
+  ports:
+   - "5432:5432"
+  restart: always
+  healthcheck:
+   test: ["CMD-SHELL", "pg_isready -U webstudio -d webstudio"]
+   interval: 10s
+   timeout: 5s
+   retries: 5
+
+ webstudio:
+  build: .
+  container_name: webstudio-builder
+  env_file:
+    - apps/builder/.env
+  ports:
+   - "3000:3000"
+  expose:
+   - "3000"
+  depends_on:
+   postgres:
+    condition: service_healthy
+  restart: always
+
+ postgrest:
+  image: postgrest/postgrest:v12.2.0
+  container_name: webstudio-postgrest
+  depends_on:
+    postgres:
+      condition: service_healthy
+  restart: always
+  environment:
+    PGRST_DB_URI: postgresql://webstudio:tg66ZoOnBAxPM1HNFK@webstudio-postgres:5432/webstudio
+    PGRST_DB_SCHEMAS: public
+    PGRST_DB_ANON_ROLE: webstudio
+    PGRST_JWT_SECRET: aaHkCf42sHsVh2wFrua7JvjTnaPLc2Zt0kJ2GJnrbJPqJRrm9t
+    PGRST_DB_USE_LEGACY_GUCS: "false"
+    PGRST_APP_SETTINGS_JWT_SECRET: aaHkCf42sHsVh2wFrua7JvjTnaPLc2Zt0kJ2GJnrbJPqJRrm9t
+    PGRST_DB_POOL: "10"
+    PGRST_DB_POOL_ACQUISITION_TIMEOUT: "10"
+  ports:
+    - "3001:3000"
+  healthcheck:
+    test: [ "CMD-SHELL", "wget -q --spider http://localhost:3000/ || exit 1" ]
+    interval: 10s
+    timeout: 5s
+    retries: 3
+    start_period: 10s
+
+volumes:
+ postgres_data:
