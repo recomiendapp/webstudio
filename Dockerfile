@@ -3,10 +3,6 @@ FROM node:20-alpine AS build
 RUN npm install -g pnpm 
 WORKDIR /app
 
-# AÑADIR ESTO
-ARG APP_URL
-ARG PUBLIC_URL
-
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./ 
 COPY vite.*.ts ./ 
 COPY patches ./patches 
