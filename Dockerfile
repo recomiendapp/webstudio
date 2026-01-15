@@ -1,5 +1,5 @@
 # --- Étape 1 : build ---
-FROM node:20-bullseye AS build
+FROM node:20-alpine AS build 
 RUN npm install -g pnpm 
 WORKDIR /app
 
@@ -11,8 +11,18 @@ COPY packages ./packages
 
 RUN pnpm install --frozen-lockfile
 
-RUN apk add --no-cache openssl && \
-    mkdir -p /app/https && \
+RUN apk add --no-cache \
+    bash \
+    libc6-compat \
+    openssl \
+    openssl-dev \
+    curl \
+    git \
+    make \
+    g++ \
+    python3
+
+RUN mkdir -p /app/https && \
     openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
       -keyout /app/https/privkey.pem \
       -out /app/https/fullchain.pem \
