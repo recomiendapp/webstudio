@@ -1,61 +1,65 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: 'postgres:16-alpine'
     container_name: webstudio-postgres
+    # CORRECCIÓN AQUÍ:
     networks:
       - webstudio-net
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: '${POSTGRES_USER}'
+      POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}'
+      POSTGRES_DB: '${POSTGRES_DB}'
     volumes:
-      - postgres_data_v2:/var/lib/postgresql/data
+      - 'postgres_data_v2:/var/lib/postgresql/data'
     ports:
-      - "5432:5432"
+      - '5432:5432'
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
+
   webstudio:
     build: .
     container_name: webstudio-builder
+    # CORRECCIÓN AQUÍ:
     networks:
       - webstudio-net
     ports:
-      - "3000:3000"
+      - '3000:3000'
     expose:
-      - "3000"
+      - '3000'
     depends_on:
       postgres:
         condition: service_healthy
     restart: always
     environment:
-      # Forzamos IPv4 para evitar el error 'socket hang up'
       NODE_OPTIONS: "--dns-result-order=ipv4first"
-      APP_URL: ${APP_URL}
-      DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT}
-      DEPLOYMENT_URL: ${DEPLOYMENT_URL}
-      DATABASE_URL: ${DATABASE_URL}
-      DIRECT_URL: ${DIRECT_URL}
-      PUBLIC_URL: ${PUBLIC_URL}
-      DEV_LOGIN: ${DEV_LOGIN}
-      AUTH_SECRET: ${AUTH_SECRET}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-      POSTGREST_API_KEY: ${POSTGREST_API_KEY}
-      POSTGREST_URL: ${POSTGREST_URL}
-      FEATURES: ${FEATURES}
-      USER_PLAN: ${USER_PLAN}
-      MAX_ASSETS_PER_PROJECT: ${MAX_ASSETS_PER_PROJECT}
-      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE}
-      PUBLISHER_HOST: ${PUBLISHER_HOST}
-      PUBLISHER_ENDPOINT: ${PUBLISHER_ENDPOINT}
-      BUILD_ORIGIN: ${BUILD_ORIGIN}
+      APP_URL: '${APP_URL}'
+      DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT}'
+      DEPLOYMENT_URL: '${DEPLOYMENT_URL}'
+      DATABASE_URL: '${DATABASE_URL}'
+      DIRECT_URL: '${DIRECT_URL}'
+      PUBLIC_URL: '${PUBLIC_URL}'
+      DEV_LOGIN: '${DEV_LOGIN}'
+      AUTH_SECRET: '${AUTH_SECRET}'
+      GOOGLE_CLIENT_ID: '${GOOGLE_CLIENT_ID}'
+      GOOGLE_CLIENT_SECRET: '${GOOGLE_CLIENT_SECRET}'
+      POSTGREST_API_KEY: '${POSTGREST_API_KEY}'
+      POSTGREST_URL: '${POSTGREST_URL}'
+      FEATURES: '${FEATURES}'
+      USER_PLAN: '${USER_PLAN}'
+      MAX_ASSETS_PER_PROJECT: '${MAX_ASSETS_PER_PROJECT}'
+      MAX_UPLOAD_SIZE: '${MAX_UPLOAD_SIZE}'
+      PUBLISHER_HOST: '${PUBLISHER_HOST}'
+      PUBLISHER_ENDPOINT: '${PUBLISHER_ENDPOINT}'
+      BUILD_ORIGIN: '${BUILD_ORIGIN}'
+
   postgrest:
-    image: postgrest/postgrest:v12.2.0
+    image: 'postgrest/postgrest:v12.2.0'
     container_name: webstudio-postgrest
+    # CORRECCIÓN AQUÍ:
     networks:
       - webstudio-net
     depends_on:
@@ -63,31 +67,28 @@ services:
         condition: service_healthy
     restart: always
     environment:
-      PGRST_DB_URI: ${PGRST_DB_URI}
+      PGRST_DB_URI: '${PGRST_DB_URI}'
       PGRST_DB_SCHEMAS: public
-      PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE}
-      PGRST_JWT_SECRET: ${JWT_SECRET}
-      PGRST_DB_USE_LEGACY_GUCS: "false"
-      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET:-jwtsecretjwtsecretjwtsecretjwtsecretjwtsecretjwtsecretjwtsecretjwtsecretjwtsecretjwtsecretjwtsecretjwtsecret}
-      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
-      PGRST_DB_POOL: "10"
-      PGRST_DB_POOL_ACQUISITION_TIMEOUT: "10"
-      # Ajustes de estabilidad adicionales
-      PGRST_DB_PREPARED_STATEMENTS: "false"
+      PGRST_DB_ANON_ROLE: '${PGRST_DB_ANON_ROLE}'
+      PGRST_JWT_SECRET: '${JWT_SECRET}'
+      PGRST_DB_USE_LEGACY_GUCS: 'false'
+      PGRST_APP_SETTINGS_JWT_SECRET: '${JWT_SECRET}'
+      PGRST_APP_SETTINGS_JWT_EXP: '${JWT_EXPIRY}'
+      PGRST_DB_POOL: '10'
+      PGRST_DB_POOL_ACQUISITION_TIMEOUT: '10'
+      PGRST_DB_PREPARED_STATEMENTS: 'false'
     healthcheck:
-      # Cambiado a /User para asegurar que el esquema está listo
-      test: [ "CMD-SHELL", "wget -q --spider http://localhost:3000/User || exit 1" ]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/User || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 10s
     ports:
-      - "3001:3000"
-  networks:
-    webstudio-net:
-      driver: bridge
-      driver_opts:
-        # Ajuste de MTU recomendado para redes virtuales en AWS/EC2
-        com.docker.network.driver.mtu: "1400"
-  volumes:
-    postgres_data_v2:
+      - '3001:3000'
+
+networks:
+  webstudio-net:
+    driver: bridge
+
+volumes:
+  postgres_data_v2:
