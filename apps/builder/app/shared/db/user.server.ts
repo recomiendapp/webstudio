@@ -61,6 +61,7 @@ const genericCreateAccount = async (
     throw new Error("User not found");
   }
   console.log(userData);
+  console.log(crypto.randomUUID());
   const newUser = await context.postgrest.client
     .from("User")
     .insert({
