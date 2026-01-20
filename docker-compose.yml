@@ -60,7 +60,6 @@ services:
         condition: service_healthy
     restart: always
     environment:
-      NODE_OPTIONS: "--dns-result-order=ipv4first"
       APP_URL: '${APP_URL}'
       DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT}'
       DEPLOYMENT_URL: '${DEPLOYMENT_URL}'
