@@ -54,7 +54,7 @@ const genericCreateAccount = async (
   if (dbUser.error == null) {
     return formatUser(dbUser.data);
   }
-
+  console.log(dbUser.error.code)
   // https://github.com/PostgREST/postgrest/blob/bfbd033c6e9f38cfbc8b1cfe19ee009a9379e3dd/docs/references/errors.rst#L234
   if (dbUser.error.code !== "PGRST116") {
     console.error(dbUser.error);
@@ -70,6 +70,7 @@ const genericCreateAccount = async (
     })
     .select()
     .single();
+  console.log(newUser.error.code)
 
   if (newUser.error) {
     console.error(newUser.error);
