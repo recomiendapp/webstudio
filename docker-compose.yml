@@ -14,11 +14,12 @@ services:
       POSTGRES_DB: '${POSTGRES_DB}'
       PGDATA: /var/lib/postgresql/data
     volumes:
-      - 'postgres_data_v4:/var/lib/postgresql/data'
+      - 'postgres_data_v5:/var/lib/postgresql/data'
     # Importante: Exponemos el 5432 Y el 3000 (donde vivirá postgrest)
     ports:
       - '5432:5432'
       - '3000:3000'
+      - '3001:3001'
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
@@ -74,4 +75,4 @@ services:
       BUILD_ORIGIN: '${BUILD_ORIGIN}'
 
 volumes:
-  postgres_data_v4:
+  postgres_data_v5:
