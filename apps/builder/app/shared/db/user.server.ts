@@ -60,7 +60,7 @@ const genericCreateAccount = async (
     console.error(dbUser.error);
     throw new Error("User not found");
   }
-
+  console.log(userData);
   const newUser = await context.postgrest.client
     .from("User")
     .insert({
