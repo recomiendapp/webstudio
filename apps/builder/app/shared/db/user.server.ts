@@ -67,7 +67,9 @@ const genericCreateAccount = async (
     .insert({
       id: crypto.randomUUID(),
       ...userData,
-    });
+    })
+    .select()
+    .single();
   console.log(newUser.error.code)
 
   if (newUser.error) {
