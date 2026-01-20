@@ -44,4 +44,4 @@ fi
 echo "Using server entry: ${SSR_ENTRY}"
 # A esto (añadiendo el puerto explícitamente):
 echo "Starting remix-server on port ${PORT:-3001}"
-exec pnpm --filter "${WS_NAME}" exec remix-serve "${SSR_ENTRY}" ${PORT:-3001}
+PORT=3001 exec pnpm --filter "${WS_NAME}" exec remix-serve "${SSR_ENTRY}"
