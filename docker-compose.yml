@@ -14,7 +14,7 @@ services:
       POSTGRES_DB: '${POSTGRES_DB}'
       PGDATA: /var/lib/postgresql/data
     volumes:
-      - 'postgres_data_v3:/var/lib/postgresql/data'
+      - 'postgres_data_v4:/var/lib/postgresql/data'
     # Importante: Exponemos el 5432 Y el 3000 (donde vivirá postgrest)
     ports:
       - '5432:5432'
@@ -72,6 +72,6 @@ services:
       PUBLISHER_HOST: '${PUBLISHER_HOST}'
       PUBLISHER_ENDPOINT: '${PUBLISHER_ENDPOINT}'
       BUILD_ORIGIN: '${BUILD_ORIGIN}'
-      
+
 volumes:
-  postgres_data_v3:
+  postgres_data_v4:
