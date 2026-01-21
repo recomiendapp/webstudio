@@ -80,3 +80,8 @@ services:
       AUTH_SECRET: '${AUTH_SECRET}'
 volumes:
   postgres_data_v5:
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "1450" # Valor seguro para AWS
