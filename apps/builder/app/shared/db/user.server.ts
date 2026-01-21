@@ -60,8 +60,7 @@ const genericCreateAccount = async (
     console.error(dbUser.error);
     throw new Error("User not found");
   }
-  console.log(userData);
-  console.log(crypto.randomUUID());
+
   const newUser = await context.postgrest.client
     .from("User")
     .insert({
@@ -70,7 +69,6 @@ const genericCreateAccount = async (
     })
     .select()
     .single();
-  console.log(newUser.error.code)
 
   if (newUser.error) {
     console.error(newUser.error);
