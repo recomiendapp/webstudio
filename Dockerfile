@@ -28,6 +28,7 @@ RUN mkdir -p /app/https && \
       -out /app/https/fullchain.pem \
       -subj "/CN=localhost"
 
+ENV HTTPS_DISABLE=true 
 RUN pnpm -r --filter "@webstudio-is/builder..." run build
 
 # --- Étape 2 : runtime ---
@@ -47,6 +48,8 @@ RUN apk add --no-cache \
     python3
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
+ENV TRUST_PROXY=true
+ENV PROTOCOL=https
 ENV NODE_ENV=production 
 ENV HOST=0.0.0.0 
 ENV PORT=3000
