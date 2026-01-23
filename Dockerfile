@@ -28,7 +28,6 @@ RUN mkdir -p /app/https && \
       -out /app/https/fullchain.pem \
       -subj "/CN=localhost"
 
-ENV HTTPS_DISABLE=true 
 RUN pnpm -r --filter "@webstudio-is/builder..." run build
 
 # --- Étape 2 : runtime ---
