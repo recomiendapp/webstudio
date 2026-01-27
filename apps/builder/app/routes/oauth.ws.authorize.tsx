@@ -123,8 +123,18 @@ export const loader: LoaderFunction = async ({ request }) => {
     console.log('isBuilderUrl(redirect_uri) ', isBuilderUrl(redirect_uri));
     // Validate the redirect_uri
     // It is not pre-registered but it must match the AuthorizationServerOrigin
+    const currentUrl = new URL(request.url);
+
+    const fragments = currentUrl.host.split(".");
+    if ( env.DEPLOYMENT_URL?.includes("https")) {
+      currentUrl.protocol = "https";
+      currentUrl.host = fragments.filter(Boolean).join(".");
+    }
+    // LOGS DE DEPURACIÓN (Verás que ahora ambos coinciden en https)
+    console.log('getAuthorizationServerOrigin (Request):', getAuthorizationServerOrigin(currentUrl.toString()));
+    console.log('getAuthorizationServerOrigin (Redirect):', getAuthorizationServerOrigin(redirect_uri));
     if (
-      getAuthorizationServerOrigin(request.url) !==
+      getAuthorizationServerOrigin(currentUrl.toString()) !==
         getAuthorizationServerOrigin(redirect_uri) ||
       new URL(redirect_uri).pathname !== "/auth/ws/callback" ||
       false === isBuilderUrl(redirect_uri)
