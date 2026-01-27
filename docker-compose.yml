@@ -38,7 +38,7 @@ services:
       
       # 1. Configuración del Router HTTPS (Regla corregida)
       - "traefik.http.routers.webstudio-https.entryPoints=https"
-      - "traefik.http.routers.webstudio-https.rule=Host(`builder.recomiend.app`) || HostRegexp(`^[a-z0-9-]+\.builder\.recomiend\.app$`)"
+      - 'traefik.http.routers.webstudio-https.rule=Host(`builder.recomiend.app`) || HostRegexp(`^[a-z0-9-.]+\.builder\.recomiend\.app$`)'
       - "traefik.http.routers.webstudio-https.tls=true"
       - "traefik.http.routers.webstudio-https.priority=100" # Prioridad alta para evitar conflictos
       
@@ -54,7 +54,7 @@ services:
 
       # 4. Redirección HTTP (Regla corregida)
       - "traefik.http.routers.webstudio-http.entryPoints=http"
-      - "traefik.http.routers.webstudio-http.rule=Host(`builder.recomiend.app`) || HostRegexp(`^[a-z0-9-]+\.builder\.recomiend\.app$`)"
+      - 'traefik.http.routers.webstudio-http.rule=Host(`builder.recomiend.app`) || HostRegexp(`^[a-z0-9-.]+\.builder\.recomiend\.app$`)'
       - "traefik.http.routers.webstudio-http.middlewares=redirect-to-https"
 
       # 5. Servicio
