@@ -126,6 +126,10 @@ export const loader: LoaderFunction = async ({ request }) => {
     console.log('getAuthorizationServerOrigin ', getAuthorizationServerOrigin(redirect_uri));
     console.log('new URL(redirect_uri).pathname ', new URL(redirect_uri).pathname);
     console.log('isBuilderUrl(redirect_uri) ', isBuilderUrl(redirect_uri));
+    console.log(getAuthorizationServerOrigin(completurl) !==
+        getAuthorizationServerOrigin(redirect_uri) ||
+      new URL(redirect_uri).pathname !== "/auth/ws/callback" ||
+      false === isBuilderUrl(redirect_uri));
     // Validate the redirect_uri
     // It is not pre-registered but it must match the AuthorizationServerOrigin
     
@@ -136,7 +140,7 @@ export const loader: LoaderFunction = async ({ request }) => {
       false === isBuilderUrl(redirect_uri)
     ) {
       debug("redirect_uri does not match the registered redirect URIs");
-
+      console.log("dentro primer if");
       return json(
         {
           error: "invalid_request",
@@ -193,7 +197,13 @@ export const loader: LoaderFunction = async ({ request }) => {
           "User does not have access to the project"
         );
       }
-
+      console.log('new URL(redirect_uri).origin ', new URL(redirect_uri).origin);
+      console.log('oAuthParams.scope.projectId ', oAuthParams.scope.projectId);
+      console.log('compareUrls ', builderUrl({
+            projectId: oAuthParams.scope.projectId,
+            origin: getAuthorizationServerOrigin(completurl),
+          }));
+      
       // redirect_uri: Ensure the redirect_uri parameter value is valid and authorized
       if (
         false ===
