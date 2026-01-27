@@ -44,7 +44,7 @@ services:
       # 2. Configuración del Certificado (Para cuando resuelvas el reto DNS)
       - "traefik.http.routers.webstudio-https.tls.domains[0].main=builder.recomiend.app"
       - "traefik.http.routers.webstudio-https.tls.domains[0].sans=*.builder.recomiend.app"
-
+      - "traefik.http.routers.webstudio-proto.priority=100"
       # 3. EL FIX DEL ERROR 400: Middleware para inyectar HTTPS en las cabeceras internas
       - "traefik.http.middlewares.webstudio-proto.headers.customrequestheaders.X-Forwarded-Proto=https"
       - "traefik.http.middlewares.webstudio-proto.headers.customrequestheaders.X-Forwarded-Ssl=on"
