@@ -201,7 +201,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           new URL(redirect_uri).origin,
           builderUrl({
             projectId: oAuthParams.scope.projectId,
-            origin: getAuthorizationServerOrigin(request.url),
+            origin: getAuthorizationServerOrigin(completurl),
           })
         )
       ) {
