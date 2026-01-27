@@ -30,7 +30,7 @@ services:
     labels:
       - traefik.enable=true
       # Router HTTPS con sintaxis simplificada para que Coolify no falle el build
-      - traefik.http.routers.webstudio-https.rule=HostRegexp(`^.+\.recomiend\.app$`)
+      - traefik.http.routers.webstudio-https.rule=HostRegexp(`^.+\.builder\.recomiend\.app$`)
       - traefik.http.routers.webstudio-https.entryPoints=https
       - traefik.http.routers.webstudio-https.middlewares=gzip
       - traefik.http.routers.webstudio-https.service=webstudio-svc
@@ -40,7 +40,7 @@ services:
       - traefik.http.routers.webstudio-https.priority=100
       
       # Redirección HTTP a HTTPS
-      - traefik.http.routers.webstudio-http.rule=HostRegexp(`^.+\.recomiend\.app$`)
+      - traefik.http.routers.webstudio-http.rule=HostRegexp(`^.+\.builder\.recomiend\.app$`)
       - traefik.http.routers.webstudio-http.entryPoints=http
       - traefik.http.routers.webstudio-http.middlewares=redirect-to-https
 
