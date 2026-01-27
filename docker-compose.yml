@@ -39,7 +39,7 @@ services:
       - "traefik.http.routers.webstudio-https.entryPoints=https"
       - "traefik.http.routers.webstudio-https.rule=Host(`builder.recomiend.app`) || HostRegexp(`{subdomain:[a-z0-9-]+}.builder.recomiend.app`)"
       - "traefik.http.routers.webstudio-https.tls=true"
-      - "traefik.http.routers.webstudio-https.tls.certresolver=letsencrypt"
+      # - "traefik.http.routers.webstudio-https.tls.certresolver=letsencrypt"
       
       # 2. Configuración del Certificado (Para cuando resuelvas el reto DNS)
       - "traefik.http.routers.webstudio-https.tls.domains[0].main=builder.recomiend.app"
