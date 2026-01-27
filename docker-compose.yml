@@ -18,8 +18,8 @@ services:
       # --- Forzado de Protocolo (Crucial para el Error 400) ---
       NODE_ENV: production
       TRUST_PROXY: 'true'
-      APP_URL: 'https://builder.recomiend.app'
-      PUBLIC_URL: 'https://builder.recomiend.app'
+      APP_URL: 'http://builder.recomiend.app'
+      PUBLIC_URL: 'http://builder.recomiend.app'
       
       # --- Otras Variables ---
       FEATURES: '${FEATURES}'
@@ -31,28 +31,6 @@ services:
     ports:
       - '3001:3000' # Puerto que mapeas al exterior (aunque Traefik usa el interno)
     
-    labels:
-      - "coolify.managed=true"
-      - "traefik.enable=true"
-      # 1. Usamos solo el punto de entrada HTTP
-      - "traefik.http.routers.webstudio-http.entryPoints=http"
-      
-      # 2. Mantenemos la regla para el dominio y los proyectos
-      - "traefik.http.routers.webstudio-http.rule=Host(`builder.recomiend.app`) || HostRegexp(`{subdomain:[a-z0-9-]+}.builder.recomiend.app`)"
-      
-      # 3. Quitamos TLS por completo (anulamos HTTPS)
-      - "traefik.http.routers.webstudio-http.tls=false"
-      
-      # 4. Vinculación directa al servicio y puerto
-      - "traefik.http.routers.webstudio-http.service=webstudio-svc"
-      - "traefik.http.services.webstudio-svc.loadbalancer.server.port=3000"
-      
-      # 5. IMPORTANTE: Cambiamos la cabecera a HTTP para que la app no busque SSL
-      - "traefik.http.middlewares.webstudio-proto.headers.customrequestheaders.X-Forwarded-Proto=http"
-      - "traefik.http.routers.webstudio-http.middlewares=webstudio-proto,gzip"
-
-      # 5. Puerto interno de la aplicación (Webstudio suele usar el 3000 por defecto)
-      - "traefik.http.services.webstudio-svc.loadbalancer.server.port=3000"
 
     networks:
       - x00ossw4sogoso80kck480ow
