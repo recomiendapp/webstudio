@@ -33,34 +33,31 @@ services:
       DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT}'
     
     labels:
-      - "coolify.managed=true"
       - "traefik.enable=true"
-
-      # 1. Configuración del Router HTTPS
-      - "traefik.http.routers.webstudio-https.entryPoints=https"
-      # Esta regla permite el dominio base Y cualquier subdominio dinámico de cliente
-      - "traefik.http.routers.webstudio-https.rule=Host(`builder.recomiend.app`) || HostRegexp(`{subdomain:[a-z0-9-]+}.builder.recomiend.app`)"
-      - "traefik.http.routers.webstudio-https.tls=true"
+      - "traefik.docker.network=coolify"
       
-      # 2. DNS Challenge con Route 53 (Wildcard)
-      # Esto usará la configuración que pusimos en el coolify-proxy
+      # 1. Configuración del Router HTTPS (Regla corregida)
+      - "traefik.http.routers.webstudio-https.entryPoints=https"
+      - "traefik.http.routers.webstudio-https.rule=Host(`builder.recomiend.app`) || HostRegexp(`^[a-z0-9-]+\.builder\.recomiend\.app$`)"
+      - "traefik.http.routers.webstudio-https.tls=true"
+      - "traefik.http.routers.webstudio-https.priority=100" # Prioridad alta para evitar conflictos
+      
+      # 2. DNS Challenge
       - "traefik.http.routers.webstudio-https.tls.certresolver=letsencrypt"
       - "traefik.http.routers.webstudio-https.tls.domains[0].main=builder.recomiend.app"
       - "traefik.http.routers.webstudio-https.tls.domains[0].sans=*.builder.recomiend.app"
 
-      # 3. Middlewares: Fix Error 400 y Gzip
+      # 3. Middlewares
       - "traefik.http.routers.webstudio-https.middlewares=webstudio-proto,gzip"
       - "traefik.http.middlewares.webstudio-proto.headers.customrequestheaders.X-Forwarded-Proto=https"
-      - "traefik.http.middlewares.webstudio-proto.headers.customrequestheaders.X-Forwarded-Ssl=on"
       - "traefik.http.middlewares.gzip.compress=true"
 
-      # 4. Redirección Automática de HTTP a HTTPS
+      # 4. Redirección HTTP (Regla corregida)
       - "traefik.http.routers.webstudio-http.entryPoints=http"
-      - "traefik.http.routers.webstudio-http.rule=Host(`builder.recomiend.app`) || HostRegexp(`{subdomain:[a-z0-9-]+}.builder.recomiend.app`)"
+      - "traefik.http.routers.webstudio-http.rule=Host(`builder.recomiend.app`) || HostRegexp(`^[a-z0-9-]+\.builder\.recomiend\.app$`)"
       - "traefik.http.routers.webstudio-http.middlewares=redirect-to-https"
-      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
 
-      # 5. Vinculación al Servicio y Puerto Interno
+      # 5. Servicio
       - "traefik.http.routers.webstudio-https.service=webstudio-svc"
       - "traefik.http.services.webstudio-svc.loadbalancer.server.port=3000"
 
