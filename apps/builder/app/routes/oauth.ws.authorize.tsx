@@ -124,7 +124,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     // Validate the redirect_uri
     // It is not pre-registered but it must match the AuthorizationServerOrigin
     const currentUrl = new URL(request.url);
-
+    console.log(currentUrl);
 
     if (
       getAuthorizationServerOrigin(request.url) !==
