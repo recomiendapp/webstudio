@@ -117,6 +117,10 @@ export const loader: LoaderFunction = async ({ request }) => {
     const { redirect_uri } = parsedRedirect.data;
     console.log('redirect_uri ', redirect_uri);
     console.log('request.url ', request.url);
+    console.log('getAuthorizationServerOrigin ', getAuthorizationServerOrigin(request.url));
+    console.log('getAuthorizationServerOrigin ', getAuthorizationServerOrigin(redirect_uri));
+    console.log('new URL(redirect_uri).pathname ', new URL(redirect_uri).pathname);
+    console.log('isBuilderUrl(redirect_uri) ', isBuilderUrl(redirect_uri));
     // Validate the redirect_uri
     // It is not pre-registered but it must match the AuthorizationServerOrigin
     if (
