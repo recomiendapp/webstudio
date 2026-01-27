@@ -29,7 +29,7 @@ services:
       DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT}'
     
     ports:
-      - '3001:3001' # Puerto que mapeas al exterior (aunque Traefik usa el interno)
+      - '3000:3001' # Puerto que mapeas al exterior (aunque Traefik usa el interno)
     
     labels:
       - "coolify.managed=true"
@@ -58,7 +58,7 @@ services:
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
 
       # 5. Puerto interno de la aplicación (Webstudio suele usar el 3000 por defecto)
-      - "traefik.http.services.webstudio-svc.loadbalancer.server.port=3001"
+      - "traefik.http.services.webstudio-svc.loadbalancer.server.port=3000"
 
     networks:
       - x00ossw4sogoso80kck480ow
