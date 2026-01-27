@@ -100,17 +100,6 @@ export const loader: LoaderFunction = async ({ request }) => {
 
     const parsedRedirect = OAuthRedirectUri.safeParse(searchParams);
 
-    // 1. Forzamos que la URL de la petición use HTTPS si estamos en producción
-    // Usamos el constructor de URL para manipularla de forma segura
-    const currentUrl = new URL(request.url);
-    if (process.env.NODE_ENV === "production" || env.DEPLOYMENT_URL?.includes("https")) {
-      currentUrl.protocol = "https:";
-    }
-    const completUrl = currentUrl.toString();
-
-    const searchParams = Object.fromEntries(currentUrl.searchParams);
-    const parsedRedirect = OAuthRedirectUri.safeParse(searchParams);
-
     if (false === parsedRedirect.success) {
       debug("redirect_uri not provided in query params");
 
@@ -126,14 +115,16 @@ export const loader: LoaderFunction = async ({ request }) => {
 
     // eslint-disable-next-line camelcase
     const { redirect_uri } = parsedRedirect.data;
-    // LOGS DE DEPURACIÓN (Verás que ahora ambos coinciden en https)
-    console.log('getAuthorizationServerOrigin (Request):', getAuthorizationServerOrigin(completUrl));
-    console.log('getAuthorizationServerOrigin (Redirect):', getAuthorizationServerOrigin(redirect_uri));
-
+    console.log('redirect_uri ', redirect_uri);
+    console.log('request.url ', request.url);
+    console.log('getAuthorizationServerOrigin ', getAuthorizationServerOrigin(request.url));
+    console.log('getAuthorizationServerOrigin ', getAuthorizationServerOrigin(redirect_uri));
+    console.log('new URL(redirect_uri).pathname ', new URL(redirect_uri).pathname);
+    console.log('isBuilderUrl(redirect_uri) ', isBuilderUrl(redirect_uri));
     // Validate the redirect_uri
     // It is not pre-registered but it must match the AuthorizationServerOrigin
     if (
-      getAuthorizationServerOrigin(completUrl) !==
+      getAuthorizationServerOrigin(request.url) !==
         getAuthorizationServerOrigin(redirect_uri) ||
       new URL(redirect_uri).pathname !== "/auth/ws/callback" ||
       false === isBuilderUrl(redirect_uri)
