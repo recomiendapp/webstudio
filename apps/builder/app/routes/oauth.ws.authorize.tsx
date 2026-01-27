@@ -123,7 +123,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     console.log('isBuilderUrl(redirect_uri) ', isBuilderUrl(redirect_uri));
     // Validate the redirect_uri
     // It is not pre-registered but it must match the AuthorizationServerOrigin
-
+    
     if (
       getAuthorizationServerOrigin(request.url) !==
         getAuthorizationServerOrigin(redirect_uri) ||
