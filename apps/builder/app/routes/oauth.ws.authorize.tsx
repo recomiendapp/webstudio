@@ -115,6 +115,7 @@ export const loader: LoaderFunction = async ({ request }) => {
 
     // eslint-disable-next-line camelcase
     const { redirect_uri } = parsedRedirect.data;
+    const newurl = new URL(request.url);
     console.log('redirect_uri ', redirect_uri);
     console.log('request.url ', request.url);
     console.log('getAuthorizationServerOrigin ', getAuthorizationServerOrigin(request.url));
