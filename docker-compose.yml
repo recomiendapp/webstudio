@@ -29,7 +29,7 @@ services:
       DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT}'
     
     ports:
-      - '3000:3000' # Puerto que mapeas al exterior (aunque Traefik usa el interno)
+      - '3001:3001' # Puerto que mapeas al exterior (aunque Traefik usa el interno)
     
     labels:
       - "coolify.managed=true"
