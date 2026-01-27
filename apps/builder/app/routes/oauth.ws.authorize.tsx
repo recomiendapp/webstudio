@@ -130,7 +130,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     // It is not pre-registered but it must match the AuthorizationServerOrigin
     
     if (
-      getAuthorizationServerOrigin(request.url) !==
+      getAuthorizationServerOrigin(completurl) !==
         getAuthorizationServerOrigin(redirect_uri) ||
       new URL(redirect_uri).pathname !== "/auth/ws/callback" ||
       false === isBuilderUrl(redirect_uri)
