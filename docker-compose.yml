@@ -62,8 +62,10 @@ services:
 
     networks:
       - x00ossw4sogoso80kck480ow
-
+      - coolify
 networks:
   x00ossw4sogoso80kck480ow:
     name: x00ossw4sogoso80kck480ow
+    external: true
+  coolify:
     external: true
