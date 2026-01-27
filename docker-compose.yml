@@ -1,23 +1,69 @@
 services:
-  
   webstudio:
     build: .
-    container_name: webstudio-builder
+    container_name: webstudio-x00ossw4sogoso80kck480ow
     restart: always
     environment:
-      DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT}'
-      DEPLOYMENT_URL: '${DEPLOYMENT_URL}'
+      # --- Configuración de Base de Datos ---
       DATABASE_URL: '${DATABASE_URL}'
       DIRECT_URL: '${DIRECT_URL}'
-      GOOGLE_CLIENT_ID: '${GOOGLE_CLIENT_ID}'
-      GOOGLE_CLIENT_SECRET: '${GOOGLE_CLIENT_SECRET}'
       POSTGREST_API_KEY: '${POSTGREST_API_KEY}'
       POSTGREST_URL: '${POSTGREST_URL}'
+      
+      # --- Configuración de OAuth / Auth ---
+      GOOGLE_CLIENT_ID: '${GOOGLE_CLIENT_ID}'
+      GOOGLE_CLIENT_SECRET: '${GOOGLE_CLIENT_SECRET}'
+      AUTH_SECRET: '${AUTH_SECRET}'
+      
+      # --- Forzado de Protocolo (Crucial para el Error 400) ---
+      NODE_ENV: production
+      TRUST_PROXY: 'true'
+      APP_URL: 'https://builder.recomiend.app'
+      PUBLIC_URL: 'https://builder.recomiend.app'
+      
+      # --- Otras Variables ---
       FEATURES: '${FEATURES}'
       USER_PLAN: '${USER_PLAN}'
       MAX_ASSETS_PER_PROJECT: '${MAX_ASSETS_PER_PROJECT}'
       MAX_UPLOAD_SIZE: '${MAX_UPLOAD_SIZE}'
-      AUTH_SECRET: '${AUTH_SECRET}'
+      DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT}'
+    
     ports:
-      - '3001:3001'
+      - '3000:3000' # Puerto que mapeas al exterior (aunque Traefik usa el interno)
+    
+    labels:
+      - "coolify.managed=true"
+      - "traefik.enable=true"
+      
+      # 1. Router HTTPS: Acepta el dominio base y cualquier subdominio de cliente
+      - "traefik.http.routers.webstudio-https.entryPoints=https"
+      - "traefik.http.routers.webstudio-https.rule=Host(`builder.recomiend.app`) || HostRegexp(`{subdomain:[a-z0-9-]+}.builder.recomiend.app`)"
+      - "traefik.http.routers.webstudio-https.tls=true"
+      - "traefik.http.routers.webstudio-https.tls.certresolver=letsencrypt"
+      
+      # 2. Configuración del Certificado (Para cuando resuelvas el reto DNS)
+      - "traefik.http.routers.webstudio-https.tls.domains[0].main=builder.recomiend.app"
+      - "traefik.http.routers.webstudio-https.tls.domains[0].sans=*.builder.recomiend.app"
 
+      # 3. EL FIX DEL ERROR 400: Middleware para inyectar HTTPS en las cabeceras internas
+      - "traefik.http.middlewares.webstudio-proto.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.middlewares.webstudio-proto.headers.customrequestheaders.X-Forwarded-Ssl=on"
+      - "traefik.http.routers.webstudio-https.middlewares=webstudio-proto,gzip"
+      - "traefik.http.middlewares.gzip.compress=true"
+
+      # 4. Redirección automática de HTTP a HTTPS
+      - "traefik.http.routers.webstudio-http.entryPoints=http"
+      - "traefik.http.routers.webstudio-http.rule=Host(`builder.recomiend.app`) || HostRegexp(`{subdomain:[a-z0-9-]+}.builder.recomiend.app`)"
+      - "traefik.http.routers.webstudio-http.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+
+      # 5. Puerto interno de la aplicación (Webstudio suele usar el 3000 por defecto)
+      - "traefik.http.services.webstudio-svc.loadbalancer.server.port=3000"
+
+    networks:
+      - x00ossw4sogoso80kck480ow
+
+networks:
+  x00ossw4sogoso80kck480ow:
+    name: x00ossw4sogoso80kck480ow
+    external: true
