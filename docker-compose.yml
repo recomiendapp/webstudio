@@ -34,28 +34,22 @@ services:
     labels:
       - "coolify.managed=true"
       - "traefik.enable=true"
-      
-      # 1. Router HTTPS: Acepta el dominio base y cualquier subdominio de cliente
-      - "traefik.http.routers.webstudio-https.entryPoints=https"
-      - "traefik.http.routers.webstudio-https.rule=Host(`builder.recomiend.app`) || HostRegexp(`{subdomain:[a-z0-9-]+}.builder.recomiend.app`)"
-      - "traefik.http.routers.webstudio-https.tls=true"
-      - "traefik.http.routers.webstudio-https.tls.certresolver="
-      
-      # 2. Configuración del Certificado (Para cuando resuelvas el reto DNS)
-      - "traefik.http.routers.webstudio-https.tls.domains[0].main=builder.recomiend.app"
-      - "traefik.http.routers.webstudio-https.tls.domains[0].sans=*.builder.recomiend.app"
-      - "traefik.http.routers.webstudio-proto.priority=100"
-      # 3. EL FIX DEL ERROR 400: Middleware para inyectar HTTPS en las cabeceras internas
-      - "traefik.http.middlewares.webstudio-proto.headers.customrequestheaders.X-Forwarded-Proto=https"
-      - "traefik.http.middlewares.webstudio-proto.headers.customrequestheaders.X-Forwarded-Ssl=on"
-      - "traefik.http.routers.webstudio-https.middlewares=webstudio-proto,gzip"
-      - "traefik.http.middlewares.gzip.compress=true"
-
-      # 4. Redirección automática de HTTP a HTTPS
+      # 1. Usamos solo el punto de entrada HTTP
       - "traefik.http.routers.webstudio-http.entryPoints=http"
+      
+      # 2. Mantenemos la regla para el dominio y los proyectos
       - "traefik.http.routers.webstudio-http.rule=Host(`builder.recomiend.app`) || HostRegexp(`{subdomain:[a-z0-9-]+}.builder.recomiend.app`)"
-      - "traefik.http.routers.webstudio-http.middlewares=redirect-to-https"
-      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      
+      # 3. Quitamos TLS por completo (anulamos HTTPS)
+      - "traefik.http.routers.webstudio-http.tls=false"
+      
+      # 4. Vinculación directa al servicio y puerto
+      - "traefik.http.routers.webstudio-http.service=webstudio-svc"
+      - "traefik.http.services.webstudio-svc.loadbalancer.server.port=3000"
+      
+      # 5. IMPORTANTE: Cambiamos la cabecera a HTTP para que la app no busque SSL
+      - "traefik.http.middlewares.webstudio-proto.headers.customrequestheaders.X-Forwarded-Proto=http"
+      - "traefik.http.routers.webstudio-http.middlewares=webstudio-proto,gzip"
 
       # 5. Puerto interno de la aplicación (Webstudio suele usar el 3000 por defecto)
       - "traefik.http.services.webstudio-svc.loadbalancer.server.port=3000"
