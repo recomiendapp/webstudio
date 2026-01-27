@@ -1,25 +1,29 @@
 services:
   webstudio:
     build: .
-    container_name: webstudio-x00ossw4sogoso80kck480ow
+    container_name: webstudio-app
     restart: always
+    # Redes: Asegúrate de que coincidan con las de tu base de datos y el proxy
+    networks:
+      - x00ossw4sogoso80kck480ow
+      - coolify
     environment:
-      # --- Configuración de Base de Datos ---
+      # --- Base de Datos ---
       DATABASE_URL: '${DATABASE_URL}'
       DIRECT_URL: '${DIRECT_URL}'
       POSTGREST_API_KEY: '${POSTGREST_API_KEY}'
       POSTGREST_URL: '${POSTGREST_URL}'
       
-      # --- Configuración de OAuth / Auth ---
+      # --- Autenticación (Google OAuth) ---
       GOOGLE_CLIENT_ID: '${GOOGLE_CLIENT_ID}'
       GOOGLE_CLIENT_SECRET: '${GOOGLE_CLIENT_SECRET}'
       AUTH_SECRET: '${AUTH_SECRET}'
       
-      # --- Forzado de Protocolo (Crucial para el Error 400) ---
+      # --- Configuración de Protocolo y URLs ---
       NODE_ENV: production
       TRUST_PROXY: 'true'
-      APP_URL: 'http://builder.recomiend.app'
-      PUBLIC_URL: 'http://builder.recomiend.app'
+      APP_URL: 'https://builder.recomiend.app'
+      PUBLIC_URL: 'https://builder.recomiend.app'
       
       # --- Otras Variables ---
       FEATURES: '${FEATURES}'
@@ -28,16 +32,44 @@ services:
       MAX_UPLOAD_SIZE: '${MAX_UPLOAD_SIZE}'
       DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT}'
     
-    ports:
-      - '3001:3000' # Puerto que mapeas al exterior (aunque Traefik usa el interno)
-    
+    labels:
+      - "coolify.managed=true"
+      - "traefik.enable=true"
 
-    networks:
-      - x00ossw4sogoso80kck480ow
-      - coolify
+      # 1. Configuración del Router HTTPS
+      - "traefik.http.routers.webstudio-https.entryPoints=https"
+      # Esta regla permite el dominio base Y cualquier subdominio dinámico de cliente
+      - "traefik.http.routers.webstudio-https.rule=Host(`builder.recomiend.app`) || HostRegexp(`{subdomain:[a-z0-9-]+}.builder.recomiend.app`)"
+      - "traefik.http.routers.webstudio-https.tls=true"
+      
+      # 2. DNS Challenge con Route 53 (Wildcard)
+      # Esto usará la configuración que pusimos en el coolify-proxy
+      - "traefik.http.routers.webstudio-https.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.webstudio-https.tls.domains[0].main=builder.recomiend.app"
+      - "traefik.http.routers.webstudio-https.tls.domains[0].sans=*.builder.recomiend.app"
+
+      # 3. Middlewares: Fix Error 400 y Gzip
+      - "traefik.http.routers.webstudio-https.middlewares=webstudio-proto,gzip"
+      - "traefik.http.middlewares.webstudio-proto.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.middlewares.webstudio-proto.headers.customrequestheaders.X-Forwarded-Ssl=on"
+      - "traefik.http.middlewares.gzip.compress=true"
+
+      # 4. Redirección Automática de HTTP a HTTPS
+      - "traefik.http.routers.webstudio-http.entryPoints=http"
+      - "traefik.http.routers.webstudio-http.rule=Host(`builder.recomiend.app`) || HostRegexp(`{subdomain:[a-z0-9-]+}.builder.recomiend.app`)"
+      - "traefik.http.routers.webstudio-http.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+
+      # 5. Vinculación al Servicio y Puerto Interno
+      - "traefik.http.routers.webstudio-https.service=webstudio-svc"
+      - "traefik.http.services.webstudio-svc.loadbalancer.server.port=3000"
+
 networks:
+  # La red de tu base de datos (Postgres/Postgrest)
   x00ossw4sogoso80kck480ow:
     name: x00ossw4sogoso80kck480ow
     external: true
+  # La red del proxy de Coolify
   coolify:
+    name: coolify
     external: true

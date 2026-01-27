@@ -53,7 +53,7 @@ ENV PROTOCOL=https
 ENV NODE_ENV=production 
 ENV HOST=0.0.0.0 
 ENV PORT=3001
-ENV PUBLIC_URL=http://builder.recomiend.app
-ENV APP_URL=http://builder.recomiend.app
+ENV PUBLIC_URL=https://builder.recomiend.app
+ENV APP_URL=https://builder.recomiend.app
 
 CMD ["/app/start.sh"]
