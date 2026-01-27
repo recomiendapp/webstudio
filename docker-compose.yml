@@ -58,7 +58,7 @@ services:
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
 
       # 5. Puerto interno de la aplicación (Webstudio suele usar el 3000 por defecto)
-      - "traefik.http.services.webstudio-svc.loadbalancer.server.port=3000"
+      - "traefik.http.services.webstudio-svc.loadbalancer.server.port=3001"
 
     networks:
       - x00ossw4sogoso80kck480ow
