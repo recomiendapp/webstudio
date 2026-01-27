@@ -34,7 +34,7 @@ services:
       - traefik.http.routers.webstudio-https.entryPoints=https
       - traefik.http.routers.webstudio-https.middlewares=gzip
       - traefik.http.routers.webstudio-https.service=webstudio-svc
-      - traefik.http.routers.webstudio-https.tls.certresolver=route53
+      - traefik.http.routers.webstudio-https.tls.certresolver=letsencrypt
       - traefik.http.services.webstudio-svc.loadbalancer.server.port=3000
       - traefik.http.routers.webstudio-https.tls=true
       - traefik.http.routers.webstudio-https.priority=100
