@@ -26,7 +26,8 @@ services:
       MAX_ASSETS_PER_PROJECT: '${MAX_ASSETS_PER_PROJECT}'
       MAX_UPLOAD_SIZE: '${MAX_UPLOAD_SIZE}'
       DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT}'
-    
+    volumes:
+      - webstudio_assets:/app/public/cgi/asset
     labels:
       - traefik.enable=true
       # Router HTTPS con sintaxis simplificada para que Coolify no falle el build
@@ -47,7 +48,9 @@ services:
       # Middlewares
       - traefik.http.middlewares.webstudio-proto.headers.customrequestheaders.X-Forwarded-Proto=https
       - traefik.http.middlewares.gzip.compress=true
-
+volumes:
+  webstudio_assets:
+    driver: local
 networks:
   x00ossw4sogoso80kck480ow:
     name: x00ossw4sogoso80kck480ow
