@@ -55,7 +55,12 @@ export const loader = async ({
       project === null || project.userId === null
         ? undefined
         : await getUserById(context, project.userId);
-
+    console.log('rest.build ', {
+      ...pagesCanvasData,
+      user: user ? { email: user.email } : undefined,
+      projectDomain: project.domain,
+      projectTitle: project.title,
+    });
     return {
       ...pagesCanvasData,
       user: user ? { email: user.email } : undefined,
