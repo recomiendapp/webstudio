@@ -27,7 +27,7 @@ services:
       MAX_UPLOAD_SIZE: '${MAX_UPLOAD_SIZE}'
       DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT}'
     volumes:
-      - webstudio_assets:/app/public/cgi/asset
+      - webstudio_assets:/app/apps/builder/public/cgi/asset/
     labels:
       - traefik.enable=true
       # Router HTTPS con sintaxis simplificada para que Coolify no falle el build
