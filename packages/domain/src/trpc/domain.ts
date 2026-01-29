@@ -78,7 +78,9 @@ export const domainRouter = router({
         let hasCustomDomain = false;
 
         if (input.destination === "saas") {
+          console.log('input.destination ', input.destination);
           const currentProjectDomains = project.domainsVirtual;
+          console.log('currentProjectDomains ', currentProjectDomains);
 
           if (input.domains.includes(project.domain)) {
             domains.push(project.domain);
@@ -143,7 +145,7 @@ export const domainRouter = router({
         if (input.destination === "static" && result.success) {
           return { success: true as const, name };
         }
-
+        console.log('result ', result)
         return result;
       } catch (error) {
         return createErrorResponse(error);
