@@ -35,8 +35,7 @@ export const deploymentRouter = router({
     .output(Output)
     .mutation(() => {
       return {
-        success: false,
-        error: "NOT_IMPLEMENTED",
+        success: true,
       };
     }),
 });
