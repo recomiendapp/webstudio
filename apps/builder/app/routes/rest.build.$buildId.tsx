@@ -34,7 +34,7 @@ export const loader = async ({
   // CSRF token checks are not necessary for dashboard-only pages.
   // All requests from the builder or canvas app are safeguarded either by preventCrossOriginCookie for fetch requests
   // or by allowedDestinations for iframe requests.
-
+  console.log('dentro rest.build.$buildId');
   try {
     const buildId = params.buildId;
 

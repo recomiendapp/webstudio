@@ -129,7 +129,17 @@ export const domainRouter = router({
         if (env.BUILDER_ORIGIN === undefined) {
           throw new Error("Missing env.BUILDER_ORIGIN");
         }
-        
+        console.log('deploymentTrpc ', {
+          // used to load build data from the builder see routes/rest.build.$buildId.ts
+          builderOrigin: env.BUILDER_ORIGIN,
+          githubSha: env.GITHUB_SHA,
+          buildId: build.id,
+          // preview support
+          branchName: env.GITHUB_REF_NAME,
+          destination: input.destination,
+          // action log helper (not used for deployment, but for action logs readablity)
+          logProjectName: `${project.title} - ${project.id}`,
+        })
         const result = await deploymentTrpc.publish.mutate({
           // used to load build data from the builder see routes/rest.build.$buildId.ts
           builderOrigin: env.BUILDER_ORIGIN,
