@@ -26,6 +26,8 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
   }
   const build = await loadDevBuildByProjectId(context, project.id);
   const assets = await loadAssetsByProject(project.id, context);
+  console.log('build ', build);
+  console.log('assets ', assets);
   return {
     ...build,
     assets,
