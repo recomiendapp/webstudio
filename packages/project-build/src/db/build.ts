@@ -266,6 +266,7 @@ export const createProductionBuild = async (
     project_id: props.projectId,
     deployment: JSON.stringify(props.deployment),
   });
+  console.log('createProductionBuild ', build);
   const buildId = build.data;
   if (build.error) {
     throw build.error;
