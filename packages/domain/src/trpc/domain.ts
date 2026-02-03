@@ -43,7 +43,7 @@ export const domainRouter = router({
     .query(async ({ input, ctx }) => {
       try {
         const project = await projectApi.loadById(input.projectId, ctx);
-
+        console.log('domain.project ', project);
         return {
           success: true,
           project,
