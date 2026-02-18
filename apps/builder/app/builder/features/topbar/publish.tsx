@@ -467,6 +467,14 @@ const Publish = ({
         });
       }
     );
+    const linkTokens = await createToken(
+      {
+        projectId: projectId,
+        relation: "viewers",
+        name: "Custom link",
+      }
+    );
+    console.log('linkTokens ',linkTokens)
     /*[
     {
         "token": "8b915f23-cd74-4824-8664-c9aacd9e441a",
@@ -493,7 +501,7 @@ const Publish = ({
       projectId: project.id,
       domains,
       destination: "saas",
-      links: links,
+      links: linkTokens,
     });
 
     if (publishResult.success === false) {
