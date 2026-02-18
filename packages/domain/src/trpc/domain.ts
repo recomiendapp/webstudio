@@ -70,6 +70,7 @@ export const domainRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
+        console.log('input ', input);
         const project = await projectApi.loadById(input.projectId, ctx);
 
         const name = `${project.id}-${nanoid()}.zip`;
