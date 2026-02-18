@@ -138,6 +138,8 @@ export const domainRouter = router({
           destination: input.destination,
           // action log helper (not used for deployment, but for action logs readablity)
           logProjectName: `${project.title} - ${project.id}`,
+          domain: project.domain,
+          domainsVirtual: project.domainsVirtual,
         });
 
         if (input.destination === "static" && result.success) {
