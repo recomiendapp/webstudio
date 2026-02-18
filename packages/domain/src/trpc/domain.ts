@@ -59,6 +59,16 @@ export const domainRouter = router({
           projectId: z.string(),
           domains: z.array(z.string()),
           destination: z.literal("saas"),
+          links: z.array(z.object({
+            canClone: z.boolean(),
+            canCopy: z.boolean(),
+            canPublish: z.boolean(),
+            createdAt: z.string(),
+            name: z.string(),
+            projectId: z.string(),
+            relation: z.string(),
+            token: z.string(),
+          })),
         }),
         z.object({
           projectId: z.string(),
