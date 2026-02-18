@@ -391,6 +391,14 @@ const Publish = ({
   const [hasSelectedDomains, setHasSelectedDomains] = useState(false);
   const hasProPlan = useStore($userPlanFeatures).hasProPlan;
   const countdown = usePublishCountdown(isPublishing);
+  const {
+    data,
+    load,
+    state: loadState,
+  } = trpcClient.authorizationToken.findMany.useQuery();
+  const { send: createToken, state: createState } =
+    trpcClient.authorizationToken.create.useMutation();
+  const [links, setLinks] = useState(data ?? []);
 
   useEffect(() => {
     if (hasProPlan === false) {
@@ -430,7 +438,7 @@ const Publish = ({
   const handlePublish = async (formData: FormData) => {
     setPublishError(undefined);
     setIsPublishing(true);
-
+    
     const domains = hasProPlan
       ? formData
           .getAll(domainToPublishName)
@@ -446,7 +454,20 @@ const Publish = ({
       toast.error("Please select at least one domain to publish");
       return;
     }
-
+    const projectId = project.id;
+    createToken(
+      {
+        projectId: projectId,
+        relation: "viewers",
+        name: "Custom link",
+      },
+      () => {
+        load({ projectId }, (data) => {
+          setLinks(data ?? []);
+        });
+      }
+    );
+    console.log('links ', links)
     const publishResult = await nativeClient.domain.publish.mutate({
       projectId: project.id,
       domains,
