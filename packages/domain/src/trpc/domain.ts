@@ -59,6 +59,7 @@ export const domainRouter = router({
           projectId: z.string(),
           domains: z.array(z.string()),
           destination: z.literal("saas"),
+          links: z.arrary(z.object()),
         }),
         z.object({
           projectId: z.string(),
