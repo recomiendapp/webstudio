@@ -125,11 +125,9 @@ export const domainRouter = router({
         );
 
         const { deploymentTrpc, env } = ctx.deployment;
-        console.log('domain.publish input', input)
         if (env.BUILDER_ORIGIN === undefined) {
           throw new Error("Missing env.BUILDER_ORIGIN");
         }
-        console.log('project ', project);
         const result = await deploymentTrpc.publish.mutate({
           // used to load build data from the builder see routes/rest.build.$buildId.ts
           builderOrigin: env.BUILDER_ORIGIN,
@@ -140,8 +138,6 @@ export const domainRouter = router({
           destination: input.destination,
           // action log helper (not used for deployment, but for action logs readablity)
           logProjectName: `${project.title} - ${project.id}`,
-          domain: project.domain,
-          domainsVirtual: project.domainsVirtual,
         });
 
         if (input.destination === "static" && result.success) {
