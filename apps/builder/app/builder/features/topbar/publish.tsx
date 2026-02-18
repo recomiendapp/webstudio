@@ -474,10 +474,8 @@ const Publish = ({
         relation: "viewers",
         name: "Custom link",
       },
-      () => {
-        load({ projectId }, (data) => {
-          customToken = data;
-        });
+      (result) => {
+        console.log('result ', result);
       }
     );
 
@@ -488,6 +486,7 @@ const Publish = ({
     });
     console.log('tokenResult ', tokenResult);
     console.log('customToken ', customToken);
+    console.log('link ', links);
     /*[
         {
             "token": "8b915f23-cd74-4824-8664-c9aacd9e441a",
