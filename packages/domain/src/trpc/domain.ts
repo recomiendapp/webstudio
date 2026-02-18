@@ -78,9 +78,7 @@ export const domainRouter = router({
         let hasCustomDomain = false;
 
         if (input.destination === "saas") {
-          console.log('input.destination ', input.destination);
           const currentProjectDomains = project.domainsVirtual;
-          console.log('currentProjectDomains ', currentProjectDomains);
 
           if (input.domains.includes(project.domain)) {
             domains.push(project.domain);
@@ -129,7 +127,7 @@ export const domainRouter = router({
         if (env.BUILDER_ORIGIN === undefined) {
           throw new Error("Missing env.BUILDER_ORIGIN");
         }
-        console.log('build ', build);
+        console.log('project ', project);
         const result = await deploymentTrpc.publish.mutate({
           // used to load build data from the builder see routes/rest.build.$buildId.ts
           builderOrigin: env.BUILDER_ORIGIN,
