@@ -129,7 +129,7 @@ export const domainRouter = router({
         if (env.BUILDER_ORIGIN === undefined) {
           throw new Error("Missing env.BUILDER_ORIGIN");
         }
-        console.log('deploymentTrpc ', deploymentTrpc);
+        console.log('build ', build);
         const result = await deploymentTrpc.publish.mutate({
           // used to load build data from the builder see routes/rest.build.$buildId.ts
           builderOrigin: env.BUILDER_ORIGIN,
@@ -145,7 +145,6 @@ export const domainRouter = router({
         if (input.destination === "static" && result.success) {
           return { success: true as const, name };
         }
-        console.log('result ', result)
         return result;
       } catch (error) {
         return createErrorResponse(error);
