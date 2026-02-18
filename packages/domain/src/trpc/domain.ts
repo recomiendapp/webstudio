@@ -123,7 +123,7 @@ export const domainRouter = router({
         );
 
         const { deploymentTrpc, env } = ctx.deployment;
-
+        console.log('domain.publish input', input)
         if (env.BUILDER_ORIGIN === undefined) {
           throw new Error("Missing env.BUILDER_ORIGIN");
         }

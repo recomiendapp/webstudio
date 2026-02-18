@@ -467,14 +467,13 @@ const Publish = ({
         });
       }
     );
-    console.log('links ', links)
 
     const publishResult = await nativeClient.domain.publish.mutate({
       projectId: project.id,
       domains,
       destination: "saas",
+      links: links,
     });
-    console.log('publishResult ', publishResult)
 
     if (publishResult.success === false) {
       console.error(publishResult.error);
