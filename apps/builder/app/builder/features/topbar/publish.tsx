@@ -467,41 +467,52 @@ const Publish = ({
         });
       }
     );
-    const linkTokens = await createToken(
+    await createToken(
       {
         projectId: projectId,
         relation: "viewers",
         name: "Custom link",
+      },
+      () => {
+        load({ projectId }, (data) => {
+          setLinks(data ?? []);
+        });
       }
     );
-    console.log('linkTokens ',linkTokens)
+
+    const tokenResult = await createToken({
+      projectId,
+      relation: "viewers",
+      name: "Custom link",
+    });
+    console.log('tokenResult ', tokenResult)
     /*[
-    {
-        "token": "8b915f23-cd74-4824-8664-c9aacd9e441a",
-        "projectId": "85394263-19ee-4a62-bc49-570fa3cb6bee",
-        "name": "Custom link",
-        "relation": "administrators",
-        "createdAt": "2026-02-10T13:12:09.218+00:00",
-        "canClone": true,
-        "canCopy": true,
-        "canPublish": true
-    },
-    {
-        "token": "6eecdffd-61e1-4796-9c18-6ec01fddc3c0",
-        "projectId": "85394263-19ee-4a62-bc49-570fa3cb6bee",
-        "name": "Custom link",
-        "relation": "viewers",
-        "createdAt": "2026-02-18T09:51:53.141+00:00",
-        "canClone": true,
-        "canCopy": true,
-        "canPublish": false
-    }
-]*/
+        {
+            "token": "8b915f23-cd74-4824-8664-c9aacd9e441a",
+            "projectId": "85394263-19ee-4a62-bc49-570fa3cb6bee",
+            "name": "Custom link",
+            "relation": "administrators",
+            "createdAt": "2026-02-10T13:12:09.218+00:00",
+            "canClone": true,
+            "canCopy": true,
+            "canPublish": true
+        },
+        {
+            "token": "6eecdffd-61e1-4796-9c18-6ec01fddc3c0",
+            "projectId": "85394263-19ee-4a62-bc49-570fa3cb6bee",
+            "name": "Custom link",
+            "relation": "viewers",
+            "createdAt": "2026-02-18T09:51:53.141+00:00",
+            "canClone": true,
+            "canCopy": true,
+            "canPublish": false
+        }
+    ]*/
     const publishResult = await nativeClient.domain.publish.mutate({
       projectId: project.id,
       domains,
       destination: "saas",
-      links: linkTokens,
+      links: links,
     });
 
     if (publishResult.success === false) {
