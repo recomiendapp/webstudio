@@ -467,6 +467,7 @@ const Publish = ({
         });
       }
     );
+    let customToken = null;
     await createToken(
       {
         projectId: projectId,
@@ -475,7 +476,7 @@ const Publish = ({
       },
       () => {
         load({ projectId }, (data) => {
-          setLinks(data ?? []);
+          customToken = data;
         });
       }
     );
@@ -485,7 +486,8 @@ const Publish = ({
       relation: "viewers",
       name: "Custom link",
     });
-    console.log('tokenResult ', tokenResult)
+    console.log('tokenResult ', tokenResult);
+    console.log('customToken ', customToken);
     /*[
         {
             "token": "8b915f23-cd74-4824-8664-c9aacd9e441a",
