@@ -455,19 +455,8 @@ const Publish = ({
       return;
     }
     const projectId = project.id;
-    await createToken(
-      {
-        projectId: projectId,
-        relation: "viewers",
-        name: "Custom link",
-      },
-      () => {
-        load({ projectId }, (data) => {
-          setLinks(data ?? []);
-        });
-      }
-    );
-    let customToken = null;
+
+    let customLinks = null;
     await createToken(
       {
         projectId: projectId,
@@ -475,18 +464,12 @@ const Publish = ({
         name: "Custom link",
       },
       (result) => {
-        console.log('result ', result);
+        customLinks = result;
       }
     );
 
-    const tokenResult = await createToken({
-      projectId,
-      relation: "viewers",
-      name: "Custom link",
-    });
-    console.log('tokenResult ', tokenResult);
-    console.log('customToken ', customToken);
-    console.log('link ', links);
+
+    console.log('customLinks ', customLinks);
     /*[
         {
             "token": "8b915f23-cd74-4824-8664-c9aacd9e441a",
@@ -513,7 +496,7 @@ const Publish = ({
       projectId: project.id,
       domains,
       destination: "saas",
-      links: links,
+      links: customLinks,
     });
 
     if (publishResult.success === false) {
