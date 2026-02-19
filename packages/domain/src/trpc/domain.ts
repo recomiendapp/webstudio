@@ -147,6 +147,7 @@ export const domainRouter = router({
           destination: input.destination,
           // action log helper (not used for deployment, but for action logs readablity)
           logProjectName: `${project.title} - ${project.id}`,
+          projectId: project.id,
           links: input.links,
           domains: domains,
         });
