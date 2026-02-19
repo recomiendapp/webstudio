@@ -79,7 +79,6 @@ export const domainRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        console.log('input ', input);
         const project = await projectApi.loadById(input.projectId, ctx);
 
         const name = `${project.id}-${nanoid()}.zip`;
@@ -137,6 +136,7 @@ export const domainRouter = router({
         if (env.BUILDER_ORIGIN === undefined) {
           throw new Error("Missing env.BUILDER_ORIGIN");
         }
+        console.log('mutate ', input);
         const result = await deploymentTrpc.publish.mutate({
           // used to load build data from the builder see routes/rest.build.$buildId.ts
           builderOrigin: env.BUILDER_ORIGIN,
@@ -147,6 +147,7 @@ export const domainRouter = router({
           destination: input.destination,
           // action log helper (not used for deployment, but for action logs readablity)
           logProjectName: `${project.title} - ${project.id}`,
+          links: input.links,
         });
 
         if (input.destination === "static" && result.success) {
