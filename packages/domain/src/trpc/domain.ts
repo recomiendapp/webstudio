@@ -152,6 +152,7 @@ export const domainRouter = router({
           domains: domains,
         });
         console.log('result ', result);
+        console.log('result success: ', result.success);
 
         if (input.destination === "static" && result.success) {
           return { success: true as const, name };
