@@ -154,7 +154,7 @@ export const domainRouter = router({
         console.log('result ', result);
         console.log('result success: ', result.success);
 
-        if (input.destination === "static" && result.success) {
+        if (input.destination === "static" && result.json.success) {
           return { success: true as const, name };
         }
         return result;
