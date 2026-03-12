@@ -89,6 +89,7 @@ import { CopyToClipboard } from "~/shared/copy-to-clipboard";
 import { $openProjectSettings } from "~/shared/nano-states/project-settings";
 import { RelativeTime } from "~/builder/shared/relative-time";
 import cmsUpgradeBanner from "~/shared/cms-upgrade-banner.svg?url";
+import type { LinkOptions } from "~/shared/share-project/share-project";
 
 type ChangeProjectDomainProps = {
   project: Project;
@@ -456,22 +457,50 @@ const Publish = ({
     }
     const projectId = project.id;
 
-    let customLinks = null;
-    await createToken(
-      {
-        projectId: projectId,
-        relation: "viewers",
-        name: "Custom link",
-      },
-      (result) => {
-        customLinks = result;
+    const loadLinks = () =>
+      new Promise<LinkOptions[]>((resolve) => {
+        load({ projectId }, (data) => resolve(data ?? []));
+      });
+
+    const createViewerLink = () =>
+      new Promise<LinkOptions>((resolve, reject) => {
+        createToken(
+          {
+            projectId,
+            relation: "viewers",
+            name: "Custom link",
+          },
+          (result) => {
+            if (result) {
+              resolve(result);
+              return;
+            }
+            reject(new Error("Create link failed"));
+          }
+        );
+      });
+
+    let currentLinks = links.length > 0 ? links : await loadLinks();
+    let selectedLink =
+      currentLinks.find((link) => link.relation === "viewers") ??
+      currentLinks[0];
+
+    if (selectedLink == null) {
+      try {
+        selectedLink = await createViewerLink();
+        currentLinks = [...currentLinks, selectedLink];
+        setLinks(currentLinks);
+      } catch (error) {
+        toast.error("No se puede crear un link de acceso para este proyecto");
+        return;
       }
-    );
+    }
+
     const publishResult = await nativeClient.domain.publish.mutate({
       projectId: project.id,
       domains,
       destination: "saas",
-      links: customLinks,
+      links: [selectedLink],
     });
 
     if (publishResult.success === false) {
