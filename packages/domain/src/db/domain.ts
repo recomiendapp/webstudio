@@ -82,11 +82,14 @@ export const create = async (
     return createErrorResponse(upsertResult.error);
   }
   // si ya existía, forzamos ACTIVE + txtRecord para que "verified" sea true
-  await context.postgrest.client
+  const updateResult = await context.postgrest.client
     .from("Domain")
     .update({ status: "ACTIVE", txtRecord })
     .eq("domain", domain);
-    
+
+  if (updateResult.error) {
+    return createErrorResponse(updateResult.error);
+  }
   // Get domain id (upsert in postgrest does not return anything in case of conflict and ignoreDuplicates)
   const domainRow = await context.postgrest.client
     .from("Domain")
