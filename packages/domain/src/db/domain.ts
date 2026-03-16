@@ -61,6 +61,7 @@ export const create = async (
   }
 
   const { domain } = validationResult;
+  const txtRecord = crypto.randomUUID();
 
   // Create domain in domain table
   const upsertResult = await context.postgrest.client
@@ -69,7 +70,8 @@ export const create = async (
       {
         id: crypto.randomUUID(),
         domain,
-        status: "INITIALIZING",
+        status: "ACTIVE",
+        
       },
       // Do not update if exists
       { onConflict: "domain", ignoreDuplicates: true }
@@ -92,7 +94,6 @@ export const create = async (
   }
 
   const domainId = domainRow.data.id;
-  const txtRecord = crypto.randomUUID();
 
   const result = await context.postgrest.client.from("ProjectDomain").insert({
     domainId,
