@@ -473,7 +473,13 @@ const Publish = ({
         projectId: project.id,
         domains,
         destination: "saas",
-        links: [selectedLink],
+        links: [
+          {
+            ...selectedLink,
+            projectId,
+            createdAt: new Date().toISOString(),
+          },
+        ],
       });
 
       // mismo manejo de publishResult que ya tienes abajo
@@ -584,7 +590,13 @@ const Publish = ({
       projectId: project.id,
       domains,
       destination: "saas",
-      links: [selectedLink],
+      links: [
+          {
+            ...selectedLink,
+            projectId,
+            createdAt: new Date().toISOString(),
+          },
+        ],
     });
 
     if (publishResult.success === false) {
