@@ -43,13 +43,13 @@ import {
 } from "@webstudio-is/design-system";
 import { validateProjectDomain, type Project } from "@webstudio-is/project";
 import {
-  $authToken,
   $awareness,
   $selectedPagePath,
   findAwarenessByInstanceId,
   type Awareness,
 } from "~/shared/awareness";
 import {
+  $authToken,
   $authTokenPermissions,
   $dataSources,
   $editingPageId,
