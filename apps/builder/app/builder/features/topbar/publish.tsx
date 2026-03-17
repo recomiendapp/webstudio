@@ -43,6 +43,7 @@ import {
 } from "@webstudio-is/design-system";
 import { validateProjectDomain, type Project } from "@webstudio-is/project";
 import {
+  $authToken,
   $awareness,
   $selectedPagePath,
   findAwarenessByInstanceId,
@@ -392,6 +393,7 @@ const Publish = ({
   const [hasSelectedDomains, setHasSelectedDomains] = useState(false);
   const hasProPlan = useStore($userPlanFeatures).hasProPlan;
   const countdown = usePublishCountdown(isPublishing);
+  const authToken = useStore($authToken);
   const {
     data,
     load,
@@ -456,7 +458,18 @@ const Publish = ({
       return;
     }
     const projectId = project.id;
-
+    // If project was opened via shared authToken, reuse it (no findMany/createToken)
+    let selectedLink: LinkOptions | undefined;
+    if (authToken) {
+      selectedLink = {
+        token: authToken,
+        name: "Shared link",
+        relation: "viewers",
+        canClone: false,
+        canCopy: false,
+        canPublish: true,
+      };
+    }
     const loadLinks = () =>
       new Promise<LinkOptions[]>((resolve) => {
         load({ projectId }, (data) => resolve(data ?? []));
@@ -480,8 +493,8 @@ const Publish = ({
         );
       });
 
-    let currentLinks = links.length > 0 ? links : await loadLinks();
-    let selectedLink =
+    let currentLinks = selectedLink == null ? links.length > 0 ? links : await loadLinks() : [];
+    selectedLink =
       currentLinks.find((link) => link.relation === "viewers") ??
       currentLinks[0];
 
