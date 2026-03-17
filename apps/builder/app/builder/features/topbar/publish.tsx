@@ -458,10 +458,9 @@ const Publish = ({
       return;
     }
     const projectId = project.id;
-    // If project was opened via shared authToken, reuse it (no findMany/createToken)
-    let selectedLink: LinkOptions | undefined;
+    // If project was opened via shared authToken, reuse it and skip token APIs
     if (authToken) {
-      selectedLink = {
+      const selectedLink: LinkOptions = {
         token: authToken,
         name: "Shared link",
         relation: "viewers",
@@ -469,6 +468,78 @@ const Publish = ({
         canCopy: false,
         canPublish: true,
       };
+
+      const publishResult = await nativeClient.domain.publish.mutate({
+        projectId: project.id,
+        domains,
+        destination: "saas",
+        links: [selectedLink],
+      });
+
+      // mismo manejo de publishResult que ya tienes abajo
+      if (publishResult.success === false) {
+        console.error(publishResult.error);
+        let error: JSX.Element | string = publishResult.error;
+        if (publishResult.error === "NOT_IMPLEMENTED") {
+          error = (
+            <>
+              <Tooltip
+                content={
+                  <Text userSelect="text">
+                    {project.latestBuildVirtual?.buildId}
+                  </Text>
+                }
+              >
+                <span>Build data</span>
+              </Tooltip>{" "}
+              for publishing has been successfully created. Use{" "}
+              <Link href="https://docs.webstudio.is/university/self-hosting/cli">
+                Webstudio&nbsp;CLI
+              </Link>{" "}
+              to generate the code.
+            </>
+          );
+        }
+        setPublishError(error);
+        if (publishResult.error === "NOT_IMPLEMENTED") {
+          toast.info(error);
+        } else {
+          toast.error(error);
+        }
+
+        if (process.env.NODE_ENV === "development") {
+          await refresh();
+        }
+        return;
+      }
+
+      // si publish ok, continúa al polling:
+      // copia el bloque de polling de abajo y pega aquí (o extrae a función)
+      let sleepTime = 15000;
+      const timeToFinish = Date.now() + PENDING_TIMEOUT + 2 * sleepTime;
+      while (Date.now() < timeToFinish) {
+        await refresh();
+        const project = $project.get();
+        if (project == null) throw new Error("Project not found");
+        const { statusText, status } =
+          project.latestBuildVirtual != null
+            ? getPublishStatusAndText(project.latestBuildVirtual)
+            : { statusText: "Not published", status: "PENDING" as const };
+        if (status === "PUBLISHED") {
+          toast.success(<>The project has been successfully published.</>, {
+            duration: 10000,
+          });
+          break;
+        }
+        if (status === "FAILED") {
+          toast.error(statusText);
+          setPublishError(statusText);
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, sleepTime));
+        sleepTime = Math.max(5000, sleepTime - 5000);
+      }
+      return;
     }
     const loadLinks = () =>
       new Promise<LinkOptions[]>((resolve) => {
@@ -493,10 +564,10 @@ const Publish = ({
         );
       });
 
-    let currentLinks = selectedLink == null ? links.length > 0 ? links : await loadLinks() : [];
-    selectedLink =
-      currentLinks.find((link) => link.relation === "viewers") ??
-      currentLinks[0];
+    let currentLinks = links.length > 0 ? links : await loadLinks();
+    let selectedLink =
+       currentLinks.find((link) => link.relation === "viewers") ??
+       currentLinks[0];
 
     if (selectedLink == null) {
       try {
