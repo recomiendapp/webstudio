@@ -151,13 +151,19 @@ export const domainRouter = router({
           links: input.links,
           domains: domains,
         });
-        console.log('result ', result);
-        console.log('result success: ', result.success);
+        // normaliza respuesta (superjson vs json normal)
+        const normalized =
+          result && typeof result === "object" && "json" in result
+            ? (result as any).json
+            : result;
 
-        if (input.destination === "static" && result.json.success) {
+        console.log("result ", result);
+        console.log("normalized ", normalized);
+
+        if (input.destination === "static" && normalized?.success) {
           return { success: true as const, name };
         }
-        return result;
+        return normalized;
       } catch (error) {
         return createErrorResponse(error);
       }
