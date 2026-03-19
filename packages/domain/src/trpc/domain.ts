@@ -153,12 +153,27 @@ export const domainRouter = router({
         });
         // normaliza respuesta (superjson vs json normal)
         const normalized =
-          result && typeof result === "object" && "json" in result
-            ? (result as any).json
-            : result;
+        result && typeof result === "object" && "json" in result
+          ? (result as any).json
+          : result;
 
-        console.log("result ", result);
-        console.log("normalized ", normalized);
+        if (normalized?.success) {
+          await ctx.postgrest.client
+            .from("Build")
+            .update({
+              publishStatus: "PUBLISHED",
+              updatedAt: new Date().toISOString(),
+            })
+            .eq("id", build.id);
+        } else {
+          await ctx.postgrest.client
+            .from("Build")
+            .update({
+              publishStatus: "FAILED",
+              updatedAt: new Date().toISOString(),
+            })
+            .eq("id", build.id);
+        }
 
         if (input.destination === "static" && normalized?.success) {
           return { success: true as const, name };
