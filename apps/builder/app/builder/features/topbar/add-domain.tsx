@@ -52,11 +52,7 @@ export const AddDomain = ({
       const registrar = await nativeClient.domain.findDomainRegistrar.query({
         domain,
       });
-      // enforce www subdomain when no support for cname flattening
-      // and root cname can conflict with MX or NS
-      if (registrar.known && !registrar.cnameFlattening) {
-        domain = `www.${domain}`;
-      }
+ 
     }
 
     const result = await nativeClient.domain.create.mutate({
