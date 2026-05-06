@@ -17,12 +17,9 @@ import {
   useSelectedAction,
 } from "@webstudio-is/design-system";
 import type { Instance, StyleSource } from "@webstudio-is/sdk";
-import {
-  $styleSources,
-  $styles,
-  $breakpoints,
-} from "~/shared/sync/data-stores";
+import { $styleSources } from "~/shared/sync/data-stores";
 import { $selectedStyleSources } from "~/shared/nano-states";
+import { $styles, $breakpoints } from "~/shared/sync/data-stores";
 import { findDuplicateTokens } from "~/shared/style-source-utils";
 import { $styleSourceUsages } from "~/builder/shared/style-source-actions";
 import { InstanceList, showInstance } from "../shared/instance-list";
@@ -314,7 +311,7 @@ export const DuplicateTokensGroup = ({
                     }
                   }}
                 >
-                  <Text variant="labelsTitleCase">
+                  <Text variant="labels">
                     {token.name}{" "}
                     <Text as="span" color="moreSubtle">
                       {formatUsageCount(usages)} · {duplicates.length} duplicate

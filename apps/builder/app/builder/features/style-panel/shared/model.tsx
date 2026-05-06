@@ -6,6 +6,7 @@ import { propertiesData } from "@webstudio-is/css-data";
 import {
   compareMedia,
   hyphenateProperty,
+  toValue,
   toVarFallback,
   type CssProperty,
   type StyleValue,
@@ -21,15 +22,17 @@ import {
 } from "@webstudio-is/sdk";
 import { rootComponent } from "@webstudio-is/sdk";
 import {
-  $breakpoints,
-  $props,
   $registeredComponentMetas,
   $selectedBreakpoint,
   $selectedInstanceStates,
   $selectedOrLastStyleSourceSelector,
+} from "~/shared/nano-states";
+import { $breakpoints } from "~/shared/sync/data-stores";
+import {
+  $props,
   $styles,
   $styleSourceSelections,
-} from "~/shared/nano-states";
+} from "~/shared/sync/data-stores";
 import {
   getComputedStyleDecl,
   getPresetStyleDeclKey,
@@ -39,7 +42,7 @@ import {
 import {
   $selectedInstancePathWithRoot,
   type InstancePath,
-} from "~/shared/awareness";
+} from "~/shared/nano-states";
 import type { InstanceSelector } from "~/shared/tree-utils";
 
 const $presetStyles = computed($registeredComponentMetas, (metas) => {
@@ -314,6 +317,24 @@ export const $availableVariables = computed(
       }
     }
     return availableVariables;
+  }
+);
+
+/**
+ * Resolved CSS custom properties for the currently selected element,
+ * keyed by full property name (e.g. "--clr-red" → "#f00").
+ * Used to substitute var() references when parsing shorthand CSS input.
+ */
+export const $cssVarsMap = computed(
+  $computedStyleDeclarations,
+  (computedStyles): Map<string, string> => {
+    const map = new Map<string, string>();
+    for (const styleDecl of computedStyles) {
+      if (styleDecl.property.startsWith("--")) {
+        map.set(styleDecl.property, toValue(styleDecl.computedValue));
+      }
+    }
+    return map;
   }
 );
 

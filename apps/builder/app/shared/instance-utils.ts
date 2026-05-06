@@ -23,6 +23,9 @@ import {
   decodeDataSourceVariable,
   encodeDataSourceVariable,
   transpileExpression,
+  getAllPages,
+  getHomePage,
+  findPageByIdOrPath,
   ROOT_INSTANCE_ID,
   portalComponent,
   collectionComponent,
@@ -37,24 +40,26 @@ import { detectTokenConflicts } from "./style-source-utils";
 import { type ConflictResolution } from "./token-conflict-dialog";
 import { buildMergedBreakpointIds } from "./breakpoints-utils";
 import {
-  $props,
-  $styles,
-  $styleSourceSelections,
-  $styleSources,
-  $instances,
   $registeredComponentMetas,
-  $dataSources,
-  $assets,
-  $breakpoints,
-  $pages,
-  $resources,
   $registeredTemplates,
-  $project,
   $isPreviewMode,
   $textEditingInstanceSelector,
   $isContentMode,
   findBlockSelector,
 } from "./nano-states";
+import { $props } from "~/shared/sync/data-stores";
+import {
+  $styles,
+  $styleSourceSelections,
+  $styleSources,
+  $instances,
+  $dataSources,
+  $assets,
+  $breakpoints,
+  $pages,
+  $resources,
+  $project,
+} from "~/shared/sync/data-stores";
 import {
   type DroppableTarget,
   type InstanceSelector,
@@ -75,14 +80,13 @@ import { serverSyncStore } from "./sync/sync-stores";
 import { setDifference, setUnion } from "./shim";
 import { breakCyclesMutable, findCycles } from "@webstudio-is/project-build";
 import {
-  $awareness,
   $selectedInstancePath,
+  $selectedInstanceSelector,
   $selectedPage,
-  findAwarenessByInstanceId,
   getInstancePath,
-  selectInstance,
   type InstancePath,
-} from "./awareness";
+} from "./nano-states";
+import { selectInstance } from "./nano-states";
 import { findClosestInstanceMatchingFragment } from "./matcher";
 import {
   findAvailableVariables,
@@ -333,11 +337,30 @@ export const insertWebstudioElementAt = (insertable?: Insertable) => {
 
 export const insertWebstudioFragmentAt = (
   fragment: WebstudioFragment,
-  insertable?: Insertable
+  insertable?: Insertable,
+  conflictResolution?: ConflictResolution
 ): boolean => {
-  // cannot insert empty fragment
-  if (fragment.children.length === 0) {
+  const hasChildren = fragment.children.length > 0;
+  const hasTokens = fragment.styleSources.length > 0;
+  if (!hasChildren && !hasTokens) {
     return false;
+  }
+  // Tokens-only fragment: insert tokens/breakpoints/styles without instances
+  if (!hasChildren && hasTokens) {
+    const project = $project.get();
+    if (project === undefined) {
+      return false;
+    }
+    updateWebstudioData((data) => {
+      insertWebstudioFragmentCopy({
+        data,
+        fragment,
+        availableVariables: [],
+        projectId: project.id,
+        conflictResolution,
+      });
+    });
+    return true;
   }
   const project = $project.get();
   insertable = findClosestInsertable(fragment, insertable) ?? insertable;
@@ -361,6 +384,7 @@ export const insertWebstudioFragmentAt = (
         startingInstanceId: instancePath[0].instance.id,
       }),
       projectId: project.id,
+      conflictResolution,
     });
     const children: Instance["children"] = fragment.children.map((child) => {
       if (child.type === "id") {
@@ -1683,15 +1707,14 @@ export const findClosestInsertable = (
   from?: Insertable
 ): undefined | Insertable => {
   const selectedPage = $selectedPage.get();
-  const awareness = $awareness.get();
   if (selectedPage === undefined) {
     return;
   }
   // paste to the page root if nothing is selected
   const instanceSelector = from?.parentSelector ??
-    awareness?.instanceSelector ?? [selectedPage.rootInstanceId];
+    $selectedInstanceSelector.get() ?? [selectedPage.rootInstanceId];
   if (instanceSelector[0] === ROOT_INSTANCE_ID) {
-    toast.error(`Cannot insert into Global Root`);
+    toast.error(`Cannot insert into Global root`);
     return;
   }
   const metas = $registeredComponentMetas.get();
@@ -1762,7 +1785,11 @@ export const buildInstancePath = (
   pages: Pages,
   instances: Instances
 ): string[] => {
-  const awareness = findAwarenessByInstanceId(pages, instances, instanceId);
+  const awareness = findPageAndSelectorByInstanceId(
+    pages,
+    instances,
+    instanceId
+  );
   if (!awareness.instanceSelector) {
     return [];
   }
@@ -1786,28 +1813,66 @@ export const buildInstancePath = (
 };
 
 /**
- * Detects token conflicts and shows resolution dialog if needed.
- * Returns the conflict resolution strategy to use.
+ * Detects token conflicts for a fragment insertion.
  *
  * @param fragment - The fragment to check for conflicts
- * @returns Promise that resolves with "theirs" (keep incoming) or "ours" (use existing), or rejects if user cancels
+ * @returns Array of token conflicts (empty if no conflicts)
  */
-export const insertFragmentWithConflictResolution = async ({
+const parentInstanceByIdCache = new WeakMap<
+  Instances,
+  Map<Instance["id"], Instance["id"]>
+>();
+
+/**
+ * Traverse the instance tree up to the root to find the page and full instance
+ * selector for a given instance id. When an instance appears via a slot,
+ * the last matching parent is used.
+ */
+export const findPageAndSelectorByInstanceId = (
+  pages: Pages,
+  instances: Instances,
+  startingInstanceId: Instance["id"]
+): { pageId: string; instanceSelector: string[] } => {
+  let parentInstanceById = parentInstanceByIdCache.get(instances);
+  if (parentInstanceById === undefined) {
+    parentInstanceById = new Map<Instance["id"], Instance["id"]>();
+    for (const instance of instances.values()) {
+      for (const child of instance.children) {
+        if (child.type === "id") {
+          parentInstanceById.set(child.value, instance.id);
+        }
+      }
+    }
+    parentInstanceByIdCache.set(instances, parentInstanceById);
+  }
+  const instanceSelector: string[] = [];
+  let currentInstanceId: undefined | Instance["id"] = startingInstanceId;
+  while (currentInstanceId) {
+    instanceSelector.push(currentInstanceId);
+    currentInstanceId = parentInstanceById.get(currentInstanceId);
+  }
+  const rootInstanceId = instanceSelector.at(-1);
+  for (const page of getAllPages(pages)) {
+    if (page.rootInstanceId === rootInstanceId) {
+      return { pageId: page.id, instanceSelector };
+    }
+  }
+  return { pageId: pages.homePageId, instanceSelector };
+};
+
+export const detectFragmentTokenConflicts = ({
   fragment,
 }: {
   fragment: WebstudioFragment;
-}): Promise<ConflictResolution> => {
+}) => {
   const data = getWebstudioData();
-  if (data === undefined) {
-    throw new Error("No webstudio data available");
-  }
 
   const mergedBreakpointIds = buildMergedBreakpointIds(
     fragment.breakpoints,
     data.breakpoints
   );
 
-  const conflicts = detectTokenConflicts({
+  return detectTokenConflicts({
     fragmentStyleSources: fragment.styleSources,
     fragmentStyles: fragment.styles,
     existingStyleSources: data.styleSources,
@@ -1815,12 +1880,60 @@ export const insertFragmentWithConflictResolution = async ({
     breakpoints: data.breakpoints,
     mergedBreakpointIds,
   });
+};
 
-  if (conflicts.length === 0) {
-    // No conflicts, use theirs (doesn't matter which since there are no conflicts)
-    return "theirs";
+/**
+ * Detects token conflicts for a page insertion.
+ * Combines fragments from ROOT_INSTANCE and page body for conflict detection.
+ *
+ * @param sourceData - The source webstudio data containing the page
+ * @param pageId - The page ID to check for conflicts
+ * @returns Array of token conflicts (empty if no conflicts)
+ */
+export const detectPageTokenConflicts = ({
+  sourceData,
+  pageId,
+}: {
+  sourceData: WebstudioData;
+  pageId: string;
+}) => {
+  const data = getWebstudioData();
+
+  const page = findPageByIdOrPath(pageId, sourceData.pages);
+  if (page === undefined) {
+    throw new Error("Page not found");
   }
+  const targetPage = page ?? getHomePage(sourceData.pages);
 
-  // Show conflict dialog and wait for user choice
-  return await builderApi.showTokenConflictDialog(conflicts);
+  // Extract fragments for both ROOT_INSTANCE and page body
+  const rootFragment = extractWebstudioFragment(sourceData, ROOT_INSTANCE_ID);
+  const pageFragment = extractWebstudioFragment(
+    sourceData,
+    targetPage.rootInstanceId
+  );
+
+  // Combine style sources and styles from both fragments
+  const combinedStyleSources = [
+    ...rootFragment.styleSources,
+    ...pageFragment.styleSources,
+  ];
+  const combinedStyles = [...rootFragment.styles, ...pageFragment.styles];
+  const combinedBreakpoints = [
+    ...rootFragment.breakpoints,
+    ...pageFragment.breakpoints,
+  ];
+
+  const mergedBreakpointIds = buildMergedBreakpointIds(
+    combinedBreakpoints,
+    data.breakpoints
+  );
+
+  return detectTokenConflicts({
+    fragmentStyleSources: combinedStyleSources,
+    fragmentStyles: combinedStyles,
+    existingStyleSources: data.styleSources,
+    existingStyles: data.styles,
+    breakpoints: data.breakpoints,
+    mergedBreakpointIds,
+  });
 };

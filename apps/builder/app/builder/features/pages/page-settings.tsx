@@ -20,7 +20,6 @@ import {
   HomePagePath,
   PageTitle,
   PagePath,
-  Folder,
   getPagePath,
   findPageByIdOrPath,
   ROOT_FOLDER_ID,
@@ -28,7 +27,7 @@ import {
   ProjectNewRedirectPath,
   isLiteralExpression,
   documentTypes,
-  isRootFolder,
+  getHomePage,
   elementComponent,
 } from "@webstudio-is/sdk";
 import {
@@ -68,14 +67,14 @@ import {
 } from "@webstudio-is/icons";
 import { useIds } from "~/shared/form-utils";
 import {
-  $assets,
-  $instances,
-  $pages,
   $publishedOrigin,
-  $project,
-  $userPlanFeatures,
+  $permissions,
   $isDesignMode,
 } from "~/shared/nano-states";
+import { $assets } from "~/shared/sync/data-stores";
+import { $project } from "~/shared/sync/data-stores";
+import { $openProjectSettings } from "~/shared/nano-states/project-settings";
+import { $instances, $pages } from "~/shared/sync/data-stores";
 import {
   BindingControl,
   BindingPopover,
@@ -91,7 +90,7 @@ import {
   validatePathnamePattern,
 } from "~/builder/shared/url-pattern";
 import { useUnmount } from "~/shared/hook-utils/use-mount";
-import { selectInstance } from "~/shared/awareness";
+import { selectInstance } from "~/shared/nano-states";
 import { computeExpression } from "~/shared/data-variables";
 import { $currentSystem } from "~/shared/system";
 import { Card } from "../marketplace/card";
@@ -100,12 +99,18 @@ import { SearchPreview } from "./search-preview";
 import { SocialPreview } from "./social-preview";
 import {
   registerFolderChildMutable,
+  cleanupChildRefsMutable,
   $pageRootScope,
   duplicatePage,
   isPathAvailable,
 } from "./page-utils";
 import { Form } from "./form";
 import { CustomMetadata } from "./custom-metadata";
+import { findMatchingRedirect } from "~/shared/project-settings/utils";
+import {
+  LOOP_ERROR,
+  wouldCreateLoop,
+} from "~/shared/redirects/redirect-loop-detection";
 
 const fieldDefaultValues = {
   name: "Untitled",
@@ -250,6 +255,24 @@ const validateValues = (
       errors.path.push(...messages);
     }
   }
+
+  // Validate redirect doesn't create a loop
+  if (
+    pages !== undefined &&
+    values.path !== undefined &&
+    computedValues.redirect &&
+    typeof computedValues.redirect === "string" &&
+    computedValues.redirect !== ""
+  ) {
+    const existingRedirects = pages.redirects ?? [];
+    if (
+      wouldCreateLoop(values.path, computedValues.redirect, existingRedirects)
+    ) {
+      errors.redirect = errors.redirect ?? [];
+      errors.redirect.push(LOOP_ERROR);
+    }
+  }
+
   return errors;
 };
 
@@ -261,7 +284,7 @@ const toFormValues = (
   const parentFolder = findParentFolderByChildId(page.id, pages.folders);
   return {
     name: page.name,
-    parentFolderId: parentFolder?.id ?? ROOT_FOLDER_ID,
+    parentFolderId: parentFolder?.id ?? pages.rootFolderId,
     path: page.path,
     title: page.title,
     description: page.meta.description ?? fieldDefaultValues.description,
@@ -296,7 +319,7 @@ const PathField = ({
   value: string;
   onChange: (value: string) => void;
 }) => {
-  const { allowDynamicData } = useStore($userPlanFeatures);
+  const { allowDynamicData } = useStore($permissions);
   const id = useId();
   return (
     <Grid gap={1}>
@@ -316,8 +339,8 @@ const PathField = ({
                   <br />
                   <Text>
                     To make the path dynamic and use it with CMS, you can use
-                    parameters and other features. CMS features are part of the
-                    Pro plan.
+                    parameters and other features. You can publish to staging
+                    for free; upgrade to Pro to publish to custom domains.
                   </Text>
                   <Link
                     className={buttonStyle({ color: "gradient" })}
@@ -368,7 +391,7 @@ const StatusField = ({
   return (
     <Grid gap={1}>
       <Flex align="center" gap={1}>
-        <Label htmlFor={id}>Status Code </Label>
+        <Label htmlFor={id}>Status code </Label>
         <Tooltip
           content={
             <Text>
@@ -440,7 +463,7 @@ const RedirectField = ({
   onChange: (value: string) => void;
 }) => {
   const id = useId();
-  const { allowDynamicData } = useStore($userPlanFeatures);
+  const { allowDynamicData } = useStore($permissions);
   const { variableValues, scope, aliases } = useStore($pageRootScope);
   return (
     <Grid gap={1}>
@@ -524,14 +547,24 @@ const LanguageField = ({
   );
 };
 
-const usePageUrl = (values: Values) => {
-  const pages = useStore($pages);
-  const foldersPath =
-    pages === undefined ? "" : getPagePath(values.parentFolderId, pages);
-  const path = [foldersPath, values.path]
+/**
+ * Compute the full page path from form values.
+ * This combines folder path with page path, handling home page special case.
+ */
+const computePagePath = (values: Values, pages: Pages): string => {
+  if (values.isHomePage) {
+    return "/";
+  }
+  const foldersPath = getPagePath(values.parentFolderId, pages);
+  return [foldersPath, values.path]
     .filter(Boolean)
     .join("/")
     .replace(/\/+/g, "/");
+};
+
+const usePageUrl = (values: Values) => {
+  const pages = useStore($pages);
+  const path = pages === undefined ? "" : computePagePath(values, pages);
 
   const system = useStore($currentSystem);
   const publishedOrigin = useStore($publishedOrigin);
@@ -621,7 +654,7 @@ const MarketplaceSection = ({
         />
       )}
       <Grid gap={1}>
-        <Label>Marketplace Preview</Label>
+        <Label>Marketplace preview</Label>
         <Box
           css={{
             padding: theme.spacing[5],
@@ -658,7 +691,7 @@ const FormFields = ({
   const fieldIds = useIds(fieldNames);
   const assets = useStore($assets);
   const pages = useStore($pages);
-  const { allowDynamicData } = useStore($userPlanFeatures);
+  const { allowDynamicData } = useStore($permissions);
   const { variableValues, scope, aliases } = useStore($pageRootScope);
 
   const pageUrl = usePageUrl(values);
@@ -683,15 +716,39 @@ const FormFields = ({
     computeExpression(values.excludePageFromSearch, variableValues)
   );
 
+  // Check if any redirect matches this page's path
+  const fullPagePath = computePagePath(values, pages);
+  const matchingRedirect = findMatchingRedirect(
+    fullPagePath,
+    pages.redirects ?? []
+  );
+
   return (
     <Grid css={{ height: "100%" }}>
       <ScrollArea>
+        {matchingRedirect && (
+          <PanelBanner variant="warning">
+            <Text>
+              A redirect from "{matchingRedirect.old}" will override this page.
+              The page will not be rendered when published.{" "}
+              <Link
+                color="inherit"
+                underline="always"
+                onClick={() => {
+                  $openProjectSettings.set("redirects");
+                }}
+              >
+                Go to Redirects settings
+              </Link>
+            </Text>
+          </PanelBanner>
+        )}
         {/**
          * ----------------------========<<<Page props>>>>========----------------------
          */}
         <Grid gap={2} css={{ padding: theme.panel.padding }}>
           <Grid gap={1}>
-            <Label htmlFor={fieldIds.name}>Page Name</Label>
+            <Label htmlFor={fieldIds.name}>Page name</Label>
             <InputErrorsTooltip errors={errors.name}>
               <InputField
                 color={errors.name && "error"}
@@ -721,7 +778,7 @@ const FormFields = ({
                     “{values.name}” is the home page
                   </Text>
                 </>
-              ) : isRootFolder({ id: values.parentFolderId }) === false ? (
+              ) : values.parentFolderId !== pages.rootFolderId ? (
                 <>
                   <HomeIcon color={rawTheme.colors.foregroundSubtle} />
                   <Text
@@ -797,8 +854,9 @@ const FormFields = ({
           {allowDynamicData === false && (
             <PanelBanner>
               <Text>
-                Dynamic routing and redirect are a part of the CMS
-                functionality.
+                Dynamic routing and redirect are part of the CMS functionality.
+                You can publish to staging for free; upgrade to Pro to publish
+                to custom domains.
               </Text>
               <Flex align="center" gap={1}>
                 <UploadIcon />
@@ -814,7 +872,7 @@ const FormFields = ({
           )}
 
           <Grid gap={1}>
-            <Label htmlFor={fieldIds.documentType}>Document Type</Label>
+            <Label htmlFor={fieldIds.documentType}>Document type</Label>
             <Select
               options={documentTypes}
               getValue={(docType: (typeof documentTypes)[number]) => docType}
@@ -850,7 +908,7 @@ const FormFields = ({
                 pages.
               </Text>
               <Grid gap={1}>
-                <Label>Search Result Preview</Label>
+                <Label>Search result preview</Label>
                 <Box
                   css={{
                     padding: theme.spacing[5],
@@ -1038,7 +1096,7 @@ const FormFields = ({
             <Text color="subtle">
               This image appears when you share a link to this page on social
               media sites. If no image is set here, the Social Image set in the
-              Project Settings will be used. The optimal dimensions for the
+              project settings will be used. The optimal dimensions for the
               image are 1200x630 px or larger with a 1.91:1 aspect ratio.
             </Text>
             <BindingControl>
@@ -1195,6 +1253,7 @@ export const NewPageSettings = ({
 
   const [values, setValues] = useState<Values>({
     ...fieldDefaultValues,
+    parentFolderId: pages?.rootFolderId ?? fieldDefaultValues.parentFolderId,
     path: nameToPath(pages, fieldDefaultValues.name),
   });
   const { variableValues } = useStore($pageRootScope);
@@ -1281,7 +1340,7 @@ const createPage = (pageId: Page["id"], values: Values) => {
         return;
       }
       const rootInstanceId = nanoid();
-      pages.pages.push({
+      pages.pages.set(pageId, {
         id: pageId,
         name: values.name,
         path: values.path,
@@ -1296,7 +1355,7 @@ const createPage = (pageId: Page["id"], values: Values) => {
         tag: "body",
         children: [],
       });
-      registerFolderChildMutable(pages.folders, pageId, values.parentFolderId);
+      registerFolderChildMutable(pages, pageId, values.parentFolderId);
       selectInstance(undefined);
     }
   );
@@ -1306,13 +1365,13 @@ const updatePage = (pageId: Page["id"], values: Partial<Values>) => {
   const updatePageMutable = (
     page: Page,
     values: Partial<Values>,
-    folders: Array<Folder>
+    pages: Pages
   ) => {
     if (values.name !== undefined) {
       page.name = values.name;
     }
     if (values.path !== undefined) {
-      page.path = values.path;
+      page.path = page.id === pages.homePageId ? "" : values.path;
     }
     if (values.title !== undefined) {
       page.title = values.title;
@@ -1360,7 +1419,7 @@ const updatePage = (pageId: Page["id"], values: Partial<Values>) => {
     }
 
     if (values.parentFolderId !== undefined) {
-      registerFolderChildMutable(folders, page.id, values.parentFolderId);
+      registerFolderChildMutable(pages, page.id, values.parentFolderId);
     }
 
     if (values.marketplaceInclude !== undefined) {
@@ -1388,59 +1447,36 @@ const updatePage = (pageId: Page["id"], values: Partial<Values>) => {
       return;
     }
 
-    if (pages.homePage.id === pageId) {
-      updatePageMutable(pages.homePage, values, pages.folders);
-    }
-
-    const pageToUpdate = pages.pages.find((page) => page.id === pageId);
+    const pageToUpdate = pages.pages.get(pageId);
 
     if (pageToUpdate !== undefined) {
-      updatePageMutable(pageToUpdate, values, pages.folders);
+      updatePageMutable(pageToUpdate, values, pages);
     }
 
     // swap home page
-    if (values.isHomePage && pages.homePage.id !== pageId) {
-      const newHomePageIndex = pages.pages.findIndex(
-        (page) => page.id === pageId
-      );
-
-      if (newHomePageIndex === -1) {
+    if (values.isHomePage && pages.homePageId !== pageId) {
+      const newHomePage = pages.pages.get(pageId);
+      const oldHomePage = getHomePage(pages);
+      if (newHomePage === undefined) {
         throw new Error(`Page with id ${pageId} not found`);
       }
 
-      const oldHomePage = pages.homePage as (typeof pages.pages)[0];
-
-      pages.homePage = pages.pages[newHomePageIndex] as typeof pages.homePage;
-
-      pages.homePage.path = "";
-
-      pages.homePage.name = "Home";
-
-      pages.pages[newHomePageIndex] = oldHomePage;
+      pages.homePageId = newHomePage.id;
+      newHomePage.path = "";
+      newHomePage.name = "Home";
 
       // For simplicity skip logic in case of names are same i.e. Old Home 1, Old Home 2
       oldHomePage.name = "Old Home";
       oldHomePage.path = nameToPath(pages, oldHomePage.name);
 
-      const rootFolder = pages.folders.find((folder) => isRootFolder(folder));
+      const rootFolder = pages.folders.get(pages.rootFolderId);
 
       if (rootFolder === undefined) {
         throw new Error("Root folder not found");
       }
 
-      if (rootFolder.children === undefined) {
-        throw new Error("Root folder must have children");
-      }
-
-      // Swap home to the first position in the root folder
-      const childIndexOfHome = rootFolder?.children.indexOf(pages.homePage.id);
-
-      if (childIndexOfHome === -1) {
-        throw new Error("Both pages must be children of Root folder");
-      }
-
-      rootFolder.children[childIndexOfHome] = rootFolder.children[0];
-      rootFolder.children[0] = pages.homePage.id;
+      cleanupChildRefsMutable(newHomePage.id, pages.folders);
+      rootFolder.children.unshift(newHomePage.id);
     }
   });
 };
@@ -1459,7 +1495,7 @@ export const PageSettings = ({
   const pages = useStore($pages);
   const page = pages && findPageByIdOrPath(pageId, pages);
 
-  const isHomePage = page?.id === pages?.homePage.id;
+  const isHomePage = page?.id === pages?.homePageId;
 
   const [unsavedValues, setUnsavedValues] = useState<Partial<Values>>({});
 

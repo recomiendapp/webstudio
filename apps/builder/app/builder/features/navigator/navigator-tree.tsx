@@ -19,7 +19,7 @@ import {
   TreeSortableItem,
   type TreeDropTarget,
 } from "@webstudio-is/design-system";
-import { showAttribute } from "@webstudio-is/react-sdk";
+import { showAttribute, getCollectionEntries } from "@webstudio-is/react-sdk";
 import {
   ROOT_INSTANCE_ID,
   collectionComponent,
@@ -40,27 +40,26 @@ import {
   $blockChildOutline,
   $editingItemSelector,
   $hoveredInstanceSelector,
-  $instances,
   $isContentMode,
-  $props,
   $propsIndex,
   $propValuesByInstanceSelector,
   $registeredComponentMetas,
-  $selectedInstanceSelector,
   getIndexedInstanceId,
   type ItemDropTarget,
   $propValuesByInstanceSelectorWithMemoryProps,
 } from "~/shared/nano-states";
-import type { InstanceSelector } from "~/shared/tree-utils";
+import { $instances, $props } from "~/shared/sync/data-stores";
+import { isDescendantOrSelf, type InstanceSelector } from "~/shared/tree-utils";
 import { serverSyncStore } from "~/shared/sync/sync-stores";
 import { reparentInstance, toggleInstanceShow } from "~/shared/instance-utils";
 import { emitCommand } from "~/builder/shared/commands";
 import { useContentEditable } from "~/shared/dom-hooks";
 import {
+  $selectedInstanceSelector,
   $selectedPage,
   getInstanceKey,
-  selectInstance,
-} from "~/shared/awareness";
+} from "~/shared/nano-states";
+import { selectInstance } from "~/shared/nano-states";
 import {
   findClosestContainer,
   isRichTextContent,
@@ -194,33 +193,39 @@ export const $flatTree = computed(
 
       // render same children for each collection item in data
       if (instance.component === collectionComponent && treeItem.isExpanded) {
-        const data = propValues?.get("data");
-        // create items only when collection has content
-        if (Array.isArray(data) && instance.children.length > 0) {
-          data.forEach((_item, dataIndex) => {
-            for (let index = 0; index < instance.children.length; index += 1) {
-              const child = instance.children[index];
-              if (child.type === "id") {
-                const isLastChild = index === instance.children.length - 1;
-                const lastDescendentItem = traverse(
-                  child.value,
-                  [
+        const originalData = propValues?.get("data");
+        if (originalData && instance.children.length > 0) {
+          const entries = getCollectionEntries(originalData);
+          if (entries.length > 0) {
+            entries.forEach(([key], entryIndex) => {
+              for (
+                let index = 0;
+                index < instance.children.length;
+                index += 1
+              ) {
+                const child = instance.children[index];
+                if (child.type === "id") {
+                  const isLastChild = index === instance.children.length - 1;
+                  const lastDescendentItem = traverse(
                     child.value,
-                    getIndexedInstanceId(instance.id, dataIndex),
-                    ...selector,
-                  ],
-                  visibleAncestors,
-                  isHidden,
-                  isReusable,
-                  isLastChild,
-                  instance.children.length * dataIndex + index
-                );
-                if (lastDescendentItem) {
-                  lastItem = lastDescendentItem;
+                    [
+                      child.value,
+                      getIndexedInstanceId(instance.id, key),
+                      ...selector,
+                    ],
+                    visibleAncestors,
+                    isHidden,
+                    isReusable,
+                    isLastChild,
+                    instance.children.length * entryIndex + index
+                  );
+                  if (lastDescendentItem) {
+                    lastItem = lastDescendentItem;
+                  }
                 }
               }
-            }
-          });
+            });
+          }
         }
       } else if (level === 0 || treeItem.isExpanded) {
         for (let index = 0; index < instance.children.length; index += 1) {
@@ -631,7 +636,7 @@ export const NavigatorTree = () => {
                 disableHoverableContent={true}
                 content={
                   <Text>
-                    Variables defined on Global Root are available on every
+                    Variables defined on Global root are available on every
                     instance on every page.
                   </Text>
                 }
@@ -655,6 +660,10 @@ export const NavigatorTree = () => {
             getInstanceKey(item.selector)
           );
           const show = Boolean(propValues?.get(showAttribute) ?? true);
+          const isSelectedDescendantItem =
+            selectedInstanceSelector !== undefined &&
+            item.selector.join() !== selectedInstanceSelector.join() &&
+            isDescendantOrSelf(item.selector, selectedInstanceSelector);
 
           // Hook memory prop
           const isAnimationSelected =
@@ -727,6 +736,7 @@ export const NavigatorTree = () => {
                 <TreeNode
                   level={level}
                   isSelected={selectedKey === key}
+                  isSelectedDescendant={isSelectedDescendantItem}
                   isHighlighted={hoveredKey === key || dropTargetKey === key}
                   isExpanded={item.isExpanded}
                   isActionVisible={isAnimating}

@@ -3,6 +3,7 @@ import {
   decodeDataSourceVariable,
   encodeDataSourceVariable,
   findPageByIdOrPath,
+  getFolderById,
   getPagePath,
   transpileExpression,
   type Folder,
@@ -22,7 +23,8 @@ import {
   restoreExpressionVariables,
   unsetExpressionVariables,
 } from "./data-variables";
-import { $project } from "./nano-states";
+import { $project } from "./sync/data-stores";
+import type { ConflictResolution } from "./token-conflict-dialog";
 
 const deduplicateName = (
   pages: Pages,
@@ -32,7 +34,7 @@ const deduplicateName = (
   const { name = pageName, copyNumber } =
     // extract a number from "name (copyNumber)"
     pageName.match(/^(?<name>.+) \((?<copyNumber>\d+)\)$/)?.groups ?? {};
-  const folder = pages.folders.find((folder) => folder.id === folderId);
+  const folder = getFolderById(pages, folderId);
   const usedNames = new Set<string>();
   for (const pageId of folder?.children ?? []) {
     const page = findPageByIdOrPath(pageId, pages);
@@ -94,9 +96,11 @@ const replaceDataSources = (
 export const insertPageCopyMutable = ({
   source,
   target,
+  conflictResolution,
 }: {
   source: { data: WebstudioData; pageId: Page["id"] };
   target: { data: WebstudioData; folderId: Folder["id"] };
+  conflictResolution?: ConflictResolution;
 }) => {
   const project = $project.get();
   const page = findPageByIdOrPath(source.pageId, source.data.pages);
@@ -112,6 +116,7 @@ export const insertPageCopyMutable = ({
       startingInstanceId: ROOT_INSTANCE_ID,
     }),
     projectId: project.id,
+    conflictResolution,
   });
   const unsetVariables = new Set<DataSource["id"]>();
   const unsetNameById = new Map<DataSource["id"], DataSource["name"]>();
@@ -136,6 +141,7 @@ export const insertPageCopyMutable = ({
     }),
     availableVariables,
     projectId: project.id,
+    conflictResolution,
   });
   // unwrap page draft
   const newPage = structuredClone(unwrap(page));
@@ -181,11 +187,7 @@ export const insertPageCopyMutable = ({
       content: transformExpression(content),
     }));
   }
-  target.data.pages.pages.push(newPage);
-  for (const folder of target.data.pages.folders) {
-    if (folder.id === target.folderId) {
-      folder.children.push(newPage.id);
-    }
-  }
+  target.data.pages.pages.set(newPage.id, newPage);
+  target.data.pages.folders.get(target.folderId)?.children.push(newPage.id);
   return newPage.id;
 };

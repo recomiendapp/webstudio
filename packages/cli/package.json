@@ -22,17 +22,20 @@
     "!*.{test,stories}.*"
   ],
   "scripts": {
-    "typecheck": "tsc",
+    "typecheck": "tsgo --noEmit",
     "build": "rm -rf lib && vite build",
     "test": "vitest run"
   },
   "license": "AGPL-3.0-or-later",
   "engines": {
-    "node": ">=20.12"
+    "node": ">=22"
   },
   "dependencies": {
     "@clack/prompts": "^0.10.0",
     "@emotion/hash": "^0.9.2",
+    "@trpc/client": "^10.45.2",
+    "@webstudio-is/project-migrations": "workspace:*",
+    "@webstudio-is/trpc-interface": "workspace:*",
     "acorn": "^8.14.1",
     "acorn-walk": "^8.3.4",
     "change-case": "^5.4.4",

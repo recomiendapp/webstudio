@@ -36,12 +36,13 @@ import {
   insertWebstudioFragmentAt,
 } from "~/shared/instance-utils";
 import type { Publish } from "~/shared/pubsub";
-import { $selectedPage } from "~/shared/awareness";
+import { $selectedPage } from "~/shared/nano-states";
 import { mapGroupBy } from "~/shared/shim";
 import {
   getInstanceLabel,
   InstanceIcon,
 } from "~/builder/shared/instance-label";
+import { titleCase } from "title-case";
 
 type Meta = {
   name: string;
@@ -264,7 +265,7 @@ export const ComponentsPanel = ({
       <ScrollArea ref={draggableContainerRef}>
         {groups.map((group) => (
           <CollapsibleSection
-            label={group.category}
+            label={titleCase(group.category)}
             key={group.category}
             fullWidth
           >

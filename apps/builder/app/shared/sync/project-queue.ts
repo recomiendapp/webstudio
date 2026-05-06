@@ -4,12 +4,20 @@ import type { Change } from "immerhin";
 import type { Project } from "@webstudio-is/project";
 import type { Build } from "@webstudio-is/project-build";
 import type { AuthPermit } from "@webstudio-is/trpc-interface/index.server";
-import * as commandQueue from "./command-queue";
-import { restPatchPath } from "~/shared/router-utils";
 import { toast } from "@webstudio-is/design-system";
-import { fetch } from "~/shared/fetch.client";
-import type { SyncStorage, Transaction } from "~/shared/sync-client";
+import {
+  $hasUnsavedSyncChanges,
+  $syncStatus,
+  createBackoff,
+  createTransactionCompletionStore,
+  type SyncStatus,
+} from "@webstudio-is/sync-client";
 import { loadBuilderData } from "~/shared/builder-data";
+import { publicStaticEnv } from "~/env/env.static";
+import { createNativeClient, nativeClient } from "~/shared/trpc/trpc-client";
+import * as commandQueue from "./command-queue";
+import type { SyncStorage } from "~/shared/sync-client";
+import type { Transaction } from "@webstudio-is/sync-client";
 
 export { commandQueue };
 
@@ -25,60 +33,51 @@ const MAX_RETRY_RECOVERY = 5;
 // We are assuming that error is fatal (unrecoverable) after this amount of attempts with API error.
 const MAX_ALLOWED_API_ERRORS = 5;
 
-// When we reached max failed attempts we will slow down the attempts interval.
-const INTERVAL_ERROR = 5000;
-const MAX_INTERVAL_ERROR = 2 * 60000;
-
 const pause = (timeout: number) => {
   return new Promise((resolve) => setTimeout(resolve, timeout));
 };
 
-export type QueueStatus =
-  | { status: "running" }
-  | { status: "idle" }
-  | { status: "recovering" }
-  | { status: "failed" }
-  | { status: "fatal"; error: string };
+/** Last server-confirmed build version. Updated after each successful PATCH. */
+export const $committedVersion = atom<number>(0);
 
-export const $queueStatus = atom<QueueStatus>({ status: "idle" });
+const transactionCompletion = createTransactionCompletionStore();
 
-const getRandomBetween = (a: number, b: number) => {
-  return Math.random() * (b - a) + a;
-};
+export const $lastTransactionId = transactionCompletion.$lastTransactionId;
+export const onTransactionComplete =
+  transactionCompletion.onTransactionComplete;
+export const onNextTransactionComplete =
+  transactionCompletion.onNextTransactionComplete;
+
 // polling is important to queue new transactions independently
 // from async iterator and batch them into single job
 const pollCommands = async function* () {
   while (true) {
     const commands = commandQueue.dequeueAll();
     if (commands.length > 0) {
-      $queueStatus.set({ status: "running" });
+      $syncStatus.set({ status: "syncing" });
       yield* commands;
       await pause(NEW_ENTRIES_INTERVAL);
       // Do not switch on idle state until there is possibility that queue is not empty
       continue;
     }
-    $queueStatus.set({ status: "idle" });
+    $syncStatus.set({ status: "idle" });
     await pause(NEW_ENTRIES_INTERVAL);
   }
 };
 
 const retry = async function* () {
-  let failedAttempts = 0;
-  let delay = INTERVAL_ERROR;
+  const backoff = createBackoff();
 
   while (true) {
     yield;
-    failedAttempts += 1;
-    if (failedAttempts < MAX_RETRY_RECOVERY) {
-      $queueStatus.set({ status: "recovering" });
+    if (backoff.attempts() < MAX_RETRY_RECOVERY) {
+      backoff.next();
+      $syncStatus.set({ status: "recovering" });
       await pause(INTERVAL_RECOVERY);
     } else {
-      $queueStatus.set({ status: "failed" });
+      $syncStatus.set({ status: "failed" });
 
-      // Clamped exponential backoff with decorrelated jitter
-      // to prevent clients from sending simultaneous requests after server issues
-      delay = getRandomBetween(INTERVAL_ERROR, delay * 3);
-      delay = Math.min(delay, MAX_INTERVAL_ERROR);
+      const delay = backoff.next();
 
       toast.error(
         `Builder is offline. Retry in ${Math.round(delay / 1000)} seconds.`
@@ -156,7 +155,11 @@ const pollQueue = async (signal: AbortSignal) => {
 
   const detailsMap = new Map<
     Project["id"],
-    { version: number; buildId: Build["id"]; authToken: string | undefined }
+    {
+      version: number;
+      buildId: Build["id"];
+      authToken: string | undefined;
+    }
   >();
 
   polling: for await (const command of pollCommands()) {
@@ -183,7 +186,7 @@ const pollQueue = async (signal: AbortSignal) => {
         }
 
         // stop synchronization and wait til user reload
-        $queueStatus.set({ status: "fatal", error });
+        $syncStatus.set({ status: "fatal", error });
 
         if (shouldReload === false) {
           toast.error(
@@ -215,7 +218,7 @@ const pollQueue = async (signal: AbortSignal) => {
         duration: Number.POSITIVE_INFINITY,
       });
 
-      $queueStatus.set({ status: "fatal", error });
+      $syncStatus.set({ status: "fatal", error });
 
       return;
     }
@@ -227,10 +230,6 @@ const pollQueue = async (signal: AbortSignal) => {
     for await (const _ of retry()) {
       // in case of any error continue retrying
       try {
-        const headers = new Headers();
-        if (details.authToken) {
-          headers.append("x-auth-token", details.authToken);
-        }
         // revise patches are not used on the server and reduce possible patch size
         const optimizedTransactions = transactions.map((transaction) => ({
           ...transaction,
@@ -239,23 +238,32 @@ const pollQueue = async (signal: AbortSignal) => {
             patches: change.patches,
           })),
         }));
-        const response = await fetch(restPatchPath(), {
-          method: "post",
-          body: JSON.stringify({
-            transactions: optimizedTransactions,
-            buildId: details.buildId,
-            projectId,
-            // provide latest stored version to server
-            version: details.version,
-            headers,
-          }),
+        const patchClient =
+          details.authToken === undefined
+            ? nativeClient
+            : createNativeClient({ "x-auth-token": details.authToken });
+        const result = await patchClient.build.patch.mutate({
+          source: "browser",
+          appVersion: publicStaticEnv.VERSION,
+          authToken: details.authToken,
+          entries: optimizedTransactions.map((transaction) => ({
+            transaction,
+          })),
+          buildId: details.buildId,
+          projectId,
+          // provide latest stored version to server
+          version: details.version,
         });
 
-        if (response.ok) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const result = (await response.json()) as any;
+        if (result) {
           if (result.status === "ok") {
-            details.version += 1;
+            details.version = result.version ?? details.version + 1;
+            $committedVersion.set(details.version);
+
+            for (const transaction of transactions) {
+              transactionCompletion.completeTransaction(transaction.id, true);
+            }
+
             // stop retrying and wait next transactions
             continue polling;
           }
@@ -263,17 +271,25 @@ const pollQueue = async (signal: AbortSignal) => {
           // user may cancel to copy own state before reloading
           if (
             result.status === "version_mismatched" ||
-            result.status === "authorization_error"
+            result.status === "authorization_error" ||
+            result.status === "partial"
           ) {
             const error =
-              result.errors ?? "Unknown version mismatch. Please reload.";
+              ("errors" in result ? result.errors : undefined) ??
+              ("entries" in result
+                ? result.entries
+                    .filter((entry) => entry.status !== "accepted")
+                    .map((entry) => entry.errors)
+                    .join("\n")
+                : undefined) ??
+              "Unknown version mismatch. Please reload.";
 
             const shouldReload = confirm(error);
             if (shouldReload) {
               location.reload();
             }
 
-            $queueStatus.set({ status: "fatal", error });
+            $syncStatus.set({ status: "fatal", error });
 
             if (shouldReload === false) {
               toast.error(
@@ -292,7 +308,7 @@ const pollQueue = async (signal: AbortSignal) => {
             } Synchronization has been paused.`;
             // Api error we don't know how to handle, as retries will not help probably
             // We should show error and break synchronization
-            $queueStatus.set({ status: "fatal", error });
+            $syncStatus.set({ status: "fatal", error });
 
             toast.error(error, {
               id: "fatal-error",
@@ -303,13 +319,6 @@ const pollQueue = async (signal: AbortSignal) => {
           }
 
           apiErrorCount += 1;
-        } else {
-          // Various 500 responses, from proxies etc
-          // It's usually ok to be here, probably restorable with retries
-          const text = await response.text();
-          // To investigate some strange errors we have seen
-
-          console.info(`Non ok response: ${text}`);
         }
       } catch (error) {
         if (navigator.onLine) {
@@ -335,6 +344,7 @@ export class ServerSyncStorage implements SyncStorage {
 
   sendTransaction(transaction: Transaction<Change[]>) {
     if (transaction.object === "server") {
+      $lastTransactionId.set(transaction.id);
       commandQueue.enqueue({
         type: "transactions",
         transactions: [transaction],
@@ -345,11 +355,11 @@ export class ServerSyncStorage implements SyncStorage {
   subscribe(setState: (state: unknown) => void, signal: AbortSignal) {
     const projectId = this.projectId;
     loadBuilderData({ projectId, signal })
-      .then((data) => {
+      .then((data: Record<string, unknown>) => {
         const serverData = new Map(Object.entries(data));
         setState(new Map([["server", serverData]]));
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         if (err instanceof Error) {
           console.error(err);
           return;
@@ -364,8 +374,8 @@ export class ServerSyncStorage implements SyncStorage {
  * Promisify idle state of the queue for a one-off notification when everything is saved.
  */
 export const isSyncIdle = () => {
-  return new Promise<QueueStatus>((resolve, reject) => {
-    const handle = (status: QueueStatus) => {
+  return new Promise<SyncStatus>((resolve, reject) => {
+    const handle = (status: SyncStatus) => {
       if (status.status === "idle") {
         resolve(status);
         return true;
@@ -380,10 +390,10 @@ export const isSyncIdle = () => {
       }
       return false;
     };
-    const status = $queueStatus.get();
+    const status = $syncStatus.get();
 
     if (handle(status) === false) {
-      const unsubscribe = $queueStatus.subscribe((status) => {
+      const unsubscribe = $syncStatus.subscribe((status) => {
         if (handle(status)) {
           unsubscribe();
         }
@@ -395,8 +405,7 @@ export const isSyncIdle = () => {
 export const usePreventUnload = () => {
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
-      const { status } = $queueStatus.get();
-      if (status === "idle" || status === "fatal") {
+      if ($hasUnsavedSyncChanges.get() === false) {
         return;
       }
       event.preventDefault();
@@ -404,4 +413,10 @@ export const usePreventUnload = () => {
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, []);
+};
+
+export const __testing__ = {
+  pollCommands,
+  retry,
+  transactionCallbacks: transactionCompletion.callbacks,
 };

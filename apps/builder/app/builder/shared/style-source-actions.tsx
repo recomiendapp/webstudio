@@ -3,6 +3,7 @@ import { atom, computed } from "nanostores";
 import { useStore } from "@nanostores/react";
 import {
   Dialog,
+  DialogActions,
   DialogContent,
   DialogTitle,
   DialogClose,
@@ -15,25 +16,22 @@ import {
 } from "@webstudio-is/design-system";
 import type { Instance, StyleSource } from "@webstudio-is/sdk";
 import {
-  $styleSources,
-  $styleSourceSelections,
-  $styles,
   $selectedStyleSources,
   $selectedStyleState,
 } from "~/shared/nano-states";
+import { $styleSources } from "~/shared/sync/data-stores";
+import { $styleSourceSelections, $styles } from "~/shared/sync/data-stores";
 import {
   deleteStyleSourceMutable,
   findUnusedTokens,
   deleteStyleSourcesMutable,
   validateAndRenameStyleSource,
   renameStyleSourceMutable,
+  toggleStyleSourceLockMutable,
   type RenameStyleSourceError,
 } from "~/shared/style-source-utils";
 import { serverSyncStore } from "~/shared/sync/sync-stores";
-import { $selectedInstance } from "~/shared/awareness";
-
-// Re-export the type for convenience
-export type { RenameStyleSourceError };
+import { $selectedInstance } from "~/shared/nano-states";
 
 const $isDeleteUnusedTokensDialogOpen = atom(false);
 
@@ -130,6 +128,15 @@ export const renameStyleSource = (
   });
 };
 
+export const setStyleSourceLocked = (
+  id: StyleSource["id"],
+  locked: boolean
+) => {
+  serverSyncStore.createTransaction([$styleSources], (styleSources) => {
+    toggleStyleSourceLockMutable({ id, locked, styleSources });
+  });
+};
+
 type DeleteStyleSourceDialogProps = {
   styleSource?: { id: StyleSource["id"]; name: string };
   onClose: () => void;
@@ -159,21 +166,22 @@ export const DeleteStyleSourceDialog = ({
         <DialogTitle>Delete confirmation</DialogTitle>
         <Flex gap="3" direction="column" css={{ padding: theme.panel.padding }}>
           <Text>{`Delete "${styleSource?.name}" token from the project including all of its styles?`}</Text>
-          <Flex direction="rowReverse" gap="2">
-            <Button
-              color="destructive"
-              onClick={() => {
-                onConfirm(styleSource!.id);
-                onClose();
-              }}
-            >
-              Delete
-            </Button>
-            <DialogClose>
-              <Button color="ghost">Cancel</Button>
-            </DialogClose>
-          </Flex>
         </Flex>
+        <DialogActions>
+          <Button
+            autoFocus
+            color="destructive"
+            onClick={() => {
+              onConfirm(styleSource!.id);
+              onClose();
+            }}
+          >
+            Delete
+          </Button>
+          <DialogClose>
+            <Button color="ghost">Cancel</Button>
+          </DialogClose>
+        </DialogActions>
       </DialogContent>
     </Dialog>
   );
@@ -233,7 +241,7 @@ export const RenameStyleSourceDialog = ({
           }
         }}
       >
-        <DialogTitle>Rename Token</DialogTitle>
+        <DialogTitle>Rename token</DialogTitle>
         <Flex gap="3" direction="column" css={{ padding: theme.panel.padding }}>
           <Flex direction="column" gap="1">
             <InputField
@@ -250,15 +258,15 @@ export const RenameStyleSourceDialog = ({
               </Text>
             )}
           </Flex>
-          <Flex direction="rowReverse" gap="2">
-            <Button color="primary" onClick={handleConfirm}>
-              Rename
-            </Button>
-            <DialogClose>
-              <Button color="ghost">Cancel</Button>
-            </DialogClose>
-          </Flex>
         </Flex>
+        <DialogActions>
+          <Button color="primary" onClick={handleConfirm}>
+            Rename
+          </Button>
+          <DialogClose>
+            <Button color="ghost">Cancel</Button>
+          </DialogClose>
+        </DialogActions>
       </DialogContent>
     </Dialog>
   );
@@ -322,32 +330,33 @@ export const DeleteUnusedTokensDialog = () => {
               </Text>
             </>
           )}
-          <Flex direction="rowReverse" gap="2">
-            {unusedTokens.length > 0 && (
-              <Button
-                color="destructive"
-                onClick={() => {
-                  const deletedCount = deleteUnusedTokens();
-                  handleClose();
-                  if (deletedCount === 0) {
-                    toast.info("No unused tokens to delete");
-                  } else {
-                    toast.success(
-                      `Deleted ${deletedCount} unused ${deletedCount === 1 ? "token" : "tokens"}`
-                    );
-                  }
-                }}
-              >
-                Delete
-              </Button>
-            )}
-            <DialogClose>
-              <Button color="ghost">
-                {unusedTokens.length > 0 ? "Cancel" : "Close"}
-              </Button>
-            </DialogClose>
-          </Flex>
         </Flex>
+        <DialogActions>
+          {unusedTokens.length > 0 && (
+            <Button
+              color="destructive"
+              autoFocus
+              onClick={() => {
+                const deletedCount = deleteUnusedTokens();
+                handleClose();
+                if (deletedCount === 0) {
+                  toast.info("No unused tokens to delete");
+                } else {
+                  toast.success(
+                    `Deleted ${deletedCount} unused ${deletedCount === 1 ? "token" : "tokens"}`
+                  );
+                }
+              }}
+            >
+              Delete
+            </Button>
+          )}
+          <DialogClose>
+            <Button color="ghost">
+              {unusedTokens.length > 0 ? "Cancel" : "Close"}
+            </Button>
+          </DialogClose>
+        </DialogActions>
       </DialogContent>
     </Dialog>
   );

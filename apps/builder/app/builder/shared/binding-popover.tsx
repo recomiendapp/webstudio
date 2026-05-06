@@ -47,6 +47,33 @@ import {
   type EditorApi,
 } from "./expression-editor";
 
+/**
+ * Check if a value is a primitive that can be safely stringified.
+ * Allows: string, number, boolean, null, undefined
+ * Rejects: object, array, function, symbol
+ */
+export const isPrimitiveValue = (value: unknown): boolean => {
+  if (value === null || value === undefined) {
+    return true;
+  }
+  const type = typeof value;
+  return type === "string" || type === "number" || type === "boolean";
+};
+
+/**
+ * Generate a validation error message for non-primitive values.
+ * @param label - The control label (e.g., "Title", "URL")
+ * @returns Error message or undefined if value is valid
+ */
+export const validatePrimitiveValue = (
+  value: unknown,
+  label: string
+): string | undefined => {
+  if (!isPrimitiveValue(value)) {
+    return `${label} expects a primitive value (string, number, boolean, null, or undefined), not an object, array, or function`;
+  }
+};
+
 export const evaluateExpressionWithinScope = (
   expression: string,
   scope: Record<string, unknown>
@@ -113,7 +140,7 @@ const BindingPanel = ({
     >
       <Box css={{ paddingBottom: theme.spacing[5] }}>
         <Flex gap="1" css={{ padding: theme.panel.padding }}>
-          <Text variant="labelsSentenceCase">Variables</Text>
+          <Text variant="labels">Variables</Text>
           <Tooltip
             variant="wrapped"
             content={
@@ -125,7 +152,7 @@ const BindingPanel = ({
         </Flex>
         {scopeEntries.length === 0 && (
           <Flex justify="center" align="center" css={{ py: theme.spacing[5] }}>
-            <Text variant="labelsSentenceCase" align="center">
+            <Text variant="labels" align="center">
               No variables available
             </Text>
           </Flex>
@@ -164,7 +191,7 @@ const BindingPanel = ({
         </CssValueListArrowFocus>
       </Box>
       <Flex gap="1" css={{ padding: theme.panel.padding }}>
-        <Text variant="labelsSentenceCase">Expression Editor</Text>
+        <Text variant="labels">Expression editor</Text>
         <Tooltip
           variant="wrapped"
           content={

@@ -18,6 +18,7 @@ import { CodeEditor } from "~/shared/code-editor";
 import {
   BindingControl,
   BindingPopover,
+  validatePrimitiveValue,
 } from "~/builder/shared/binding-popover";
 import {
   useLocalValue,
@@ -207,7 +208,7 @@ export const CodeControl = ({
               }
             >
               <Flex gap="1" align="center">
-                <Text variant="labelsTitleCase">Code Editor</Text>
+                <Text variant="labels">Code editor</Text>
                 {errorInfo}
               </Flex>
             </DialogTitle>
@@ -224,11 +225,7 @@ export const CodeControl = ({
         <BindingPopover
           scope={scope}
           aliases={aliases}
-          validate={(value) => {
-            if (value !== undefined && typeof value !== "string") {
-              return `${label} expects a string value`;
-            }
-          }}
+          validate={(value) => validatePrimitiveValue(value, label)}
           variant={variant}
           value={expression}
           onChange={(newExpression) =>

@@ -47,11 +47,9 @@ import {
 } from "@webstudio-is/design-system";
 import { TrashIcon, InfoCircleIcon, PlusIcon } from "@webstudio-is/icons";
 import { humanizeString } from "~/shared/string-utils";
-import {
-  $dataSources,
-  $resources,
-  $variableValuesByInstanceSelector,
-} from "~/shared/nano-states";
+import { $variableValuesByInstanceSelector } from "~/shared/nano-states";
+import { $dataSources } from "~/shared/sync/data-stores";
+import { $resources } from "~/shared/sync/data-stores";
 import {
   BindingControl,
   BindingPopover,
@@ -69,7 +67,7 @@ import {
   $selectedPage,
   getInstanceKey,
   type InstancePath,
-} from "~/shared/awareness";
+} from "~/shared/nano-states";
 import { updateWebstudioData } from "~/shared/instance-utils";
 import { rebindTreeVariablesMutable } from "~/shared/data-variables";
 import { parseCurl, type CurlRequest } from "./curl";
@@ -321,7 +319,7 @@ export const SearchParams = ({
   return (
     <Grid gap={1}>
       <Flex justify="between" align="center">
-        <Label>Search Params</Label>
+        <Label>Search params</Label>
         <SmallIconButton
           aria-label="Add another search param"
           icon={<PlusIcon />}
@@ -495,7 +493,7 @@ const CacheMaxAge = ({
 }) => {
   return (
     <Grid gap={1}>
-      <Label htmlFor="resource-panel-max-age">Cache Max Age</Label>
+      <Label htmlFor="resource-panel-max-age">Cache max age</Label>
       <InputField
         id="resource-panel-max-age"
         suffix={
@@ -1225,7 +1223,7 @@ export const GraphqlResourceForm = forwardRef<
       </Grid>
 
       <Grid gap={1}>
-        <Label>GraphQL Variables</Label>
+        <Label>GraphQL variables</Label>
         {/* use invisible text input to reflect expression editor in form
             type=hidden does not emit invalid event */}
         <input

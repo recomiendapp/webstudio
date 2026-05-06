@@ -1,10 +1,14 @@
 import isValidFilename from "valid-filename";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDebouncedCallback } from "use-debounce";
 import prettyBytes from "pretty-bytes";
 import { computed } from "nanostores";
 import { useStore } from "@nanostores/react";
-import { getMimeTypeByExtension } from "@webstudio-is/sdk";
+import {
+  getAllPages,
+  getMimeTypeByExtension,
+  IMAGE_MIME_TYPES,
+} from "@webstudio-is/sdk";
 import type { Asset, Pages, Props, Styles, Instance } from "@webstudio-is/sdk";
 import type {
   ImageValue,
@@ -46,32 +50,31 @@ import {
   GearIcon,
   InfoCircleIcon,
   PageIcon,
+  RefreshCcwIcon,
   TrashIcon,
 } from "@webstudio-is/icons";
 import { hyphenateProperty } from "@webstudio-is/css-engine";
 import {
-  $assets,
   $authPermit,
   $editingPageId,
-  $instances,
-  $pages,
-  $props,
-  $styles,
-  $styleSourceSelections,
-  $userPlanFeatures,
+  $permissions,
 } from "~/shared/nano-states";
+import { $assets } from "~/shared/sync/data-stores";
+import { $styleSourceSelections } from "~/shared/sync/data-stores";
 import { $openProjectSettings } from "~/shared/nano-states/project-settings";
-import {
-  $awareness,
-  findAwarenessByInstanceId,
-  selectPage,
-} from "~/shared/awareness";
+import { $styles } from "~/shared/sync/data-stores";
+import { $selectedInstanceSelector } from "~/shared/nano-states";
+import { selectPage } from "~/shared/nano-states";
+import { findPageAndSelectorByInstanceId } from "~/shared/instance-utils";
+import { $selectedPageId } from "~/shared/nano-states";
 import { updateWebstudioData } from "~/shared/instance-utils";
-import { deleteAssets } from "~/builder/shared/assets";
+import { deleteAssets, replaceAsset } from "~/builder/shared/assets";
+import { validateFiles } from "~/builder/shared/assets/asset-upload";
 import {
   $activeInspectorPanel,
   setActiveSidebarPanel,
 } from "~/builder/shared/nano-states";
+import { $instances, $pages, $props } from "~/shared/sync/data-stores";
 import {
   formatAssetName,
   parseAssetName,
@@ -109,7 +112,7 @@ const traverseStyleValue = (
   }
 };
 
-const calculateUsagesByAssetId = ({
+export const calculateUsagesByAssetId = ({
   pages,
   props,
   styles,
@@ -135,7 +138,7 @@ const calculateUsagesByAssetId = ({
     usages.push({ type: "favicon" });
   }
   if (pages) {
-    for (const page of [pages.homePage, ...pages.pages]) {
+    for (const page of getAllPages(pages)) {
       if (page.meta.socialImageAssetId) {
         const usages = mapGetOrInsert(
           usagesByAsset,
@@ -264,12 +267,14 @@ const AssetUsagesList = ({ usages }: { usages: AssetUsage[] }) => {
                   if (!prop || !pages) {
                     return;
                   }
-                  const awareness = findAwarenessByInstanceId(
-                    pages,
-                    instances,
-                    prop.instanceId
-                  );
-                  $awareness.set(awareness);
+                  const { pageId, instanceSelector } =
+                    findPageAndSelectorByInstanceId(
+                      pages,
+                      instances,
+                      prop.instanceId
+                    );
+                  $selectedPageId.set(pageId);
+                  $selectedInstanceSelector.set(instanceSelector);
                   setActiveSidebarPanel("auto");
                   $activeInspectorPanel.set("settings");
                 }}
@@ -309,12 +314,14 @@ const AssetUsagesList = ({ usages }: { usages: AssetUsage[] }) => {
                   if (!styleInstanceId || !pages) {
                     return;
                   }
-                  const awareness = findAwarenessByInstanceId(
-                    pages,
-                    instances,
-                    styleInstanceId
-                  );
-                  $awareness.set(awareness);
+                  const { pageId, instanceSelector } =
+                    findPageAndSelectorByInstanceId(
+                      pages,
+                      instances,
+                      styleInstanceId
+                    );
+                  $selectedPageId.set(pageId);
+                  $selectedInstanceSelector.set(instanceSelector);
                   setActiveSidebarPanel("auto");
                   $activeInspectorPanel.set("style");
                 }}
@@ -389,7 +396,7 @@ const AssetInfoContent = ({
   asset: Asset;
   usages: AssetUsage[];
 }) => {
-  const { hasProPlan } = useStore($userPlanFeatures);
+  const { canDownloadAssets } = useStore($permissions);
   const { size, meta, id, name } = asset;
   const { basename, ext } = parseAssetName(name);
   const [filenameError, setFilenameError] = useState<string>();
@@ -435,13 +442,33 @@ const AssetInfoContent = ({
   );
 
   const authPermit = useStore($authPermit);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
+
+  const handleReplaceFile = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const files = validateFiles(Array.from(event.target.files ?? []));
+      const file = files[0];
+      if (file) {
+        replaceAsset(id, file);
+      }
+      // Reset input so the same file can be selected again
+      event.target.value = "";
+    },
+    [id]
+  );
 
   let downloadError: undefined | string;
   if (authPermit === "view") {
     downloadError =
       "Unavailable in View mode. Switch to Edit to download assets.";
-  } else if (!hasProPlan) {
+  } else if (canDownloadAssets === false) {
     downloadError = "Upgrade to Pro to download assets.";
+  }
+
+  const isImage = asset.type === "image";
+  let replaceError: undefined | string;
+  if (authPermit === "view") {
+    replaceError = "View mode. You can't replace assets.";
   }
 
   return (
@@ -455,11 +482,11 @@ const AssetInfoContent = ({
         >
           <Flex align="center" css={{ gap: theme.spacing[3] }}>
             <CloudIcon />
-            <Text variant="labelsSentenceCase">{prettyBytes(size)}</Text>
+            <Text variant="labels">{prettyBytes(size)}</Text>
           </Flex>
           <Flex align="center" css={{ gap: theme.spacing[3] }}>
             <PageIcon />
-            <Text variant="labelsSentenceCase">
+            <Text variant="labels">
               {getMimeTypeByExtension(ext) ?? "unknown"}
             </Text>
           </Flex>
@@ -467,15 +494,13 @@ const AssetInfoContent = ({
             <>
               <Flex align="center" gap={1}>
                 <DimensionsIcon />
-                <Text variant="labelsSentenceCase">
+                <Text variant="labels">
                   {meta.width} x {meta.height}
                 </Text>
               </Flex>
               <Flex align="center" gap={1}>
                 <AspectRatioIcon />
-                <Text variant="labelsSentenceCase">
-                  {getFormattedAspectRatio(meta)}
-                </Text>
+                <Text variant="labels">{getFormattedAspectRatio(meta)}</Text>
               </Flex>
             </>
           )}
@@ -490,7 +515,7 @@ const AssetInfoContent = ({
             >
               <UsageDot />
             </Flex>
-            <Text variant="labelsSentenceCase">{usages.length} uses</Text>
+            <Text variant="labels">{usages.length} uses</Text>
           </Flex>
         </Grid>
       </Box>
@@ -594,23 +619,49 @@ const AssetInfoContent = ({
           </Dialog>
         )}
 
-        {downloadError ? (
-          <Tooltip side="bottom" content={downloadError}>
-            <IconButton disabled>
-              <DownloadIcon />
-            </IconButton>
-          </Tooltip>
-        ) : (
-          <Tooltip side="bottom" content="Download asset">
-            <IconButton
-              as="a"
-              download={formatAssetName(asset)}
-              href={getAssetUrl(asset, window.location.origin).href}
-            >
-              <DownloadIcon />
-            </IconButton>
-          </Tooltip>
-        )}
+        <Flex gap="1">
+          {isImage && (
+            <>
+              <input
+                ref={replaceInputRef}
+                type="file"
+                accept={IMAGE_MIME_TYPES.join(", ")}
+                style={{ display: "none" }}
+                onChange={handleReplaceFile}
+              />
+              {replaceError ? (
+                <Tooltip side="bottom" content={replaceError}>
+                  <IconButton disabled>
+                    <RefreshCcwIcon />
+                  </IconButton>
+                </Tooltip>
+              ) : (
+                <Tooltip side="bottom" content="Replace asset">
+                  <IconButton onClick={() => replaceInputRef.current?.click()}>
+                    <RefreshCcwIcon />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </>
+          )}
+          {downloadError ? (
+            <Tooltip side="bottom" content={downloadError}>
+              <IconButton disabled>
+                <DownloadIcon />
+              </IconButton>
+            </Tooltip>
+          ) : (
+            <Tooltip side="bottom" content="Download asset">
+              <IconButton
+                as="a"
+                download={formatAssetName(asset)}
+                href={getAssetUrl(asset, window.location.origin).href}
+              >
+                <DownloadIcon />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Flex>
       </Flex>
     </>
   );
@@ -655,7 +706,7 @@ export const AssetInfo = ({ asset }: { asset: Asset }) => {
           />
         </PopoverTrigger>
         <PopoverContent css={{ minWidth: 250 }}>
-          <PopoverTitle>Asset Details</PopoverTitle>
+          <PopoverTitle>Asset details</PopoverTitle>
           <AssetInfoContent asset={asset} usages={usages} />
         </PopoverContent>
       </Popover>

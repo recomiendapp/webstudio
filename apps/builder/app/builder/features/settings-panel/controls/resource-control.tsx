@@ -23,21 +23,19 @@ import { isLiteralExpression, Resource, type Prop } from "@webstudio-is/sdk";
 import {
   BindingControl,
   BindingPopover,
+  validatePrimitiveValue,
   type BindingVariant,
 } from "~/builder/shared/binding-popover";
-import {
-  $dataSources,
-  $props,
-  $resources,
-  $variableValuesByInstanceSelector,
-} from "~/shared/nano-states";
+import { $variableValuesByInstanceSelector } from "~/shared/nano-states";
+import { $dataSources } from "~/shared/sync/data-stores";
+import { $props, $resources } from "~/shared/sync/data-stores";
 import { computeExpression } from "~/shared/data-variables";
 import { updateWebstudioData } from "~/shared/instance-utils";
 import {
   $selectedInstance,
   $selectedInstanceKeyWithRoot,
   $selectedPage,
-} from "~/shared/awareness";
+} from "~/shared/nano-states";
 import {
   UrlField,
   MethodField,
@@ -320,11 +318,7 @@ export const ResourceControl = ({
         <BindingPopover
           scope={scope}
           aliases={aliases}
-          validate={(value) => {
-            if (value !== undefined && typeof value !== "string") {
-              return `Expected URL string value`;
-            }
-          }}
+          validate={(value) => validatePrimitiveValue(value, "URL")}
           variant={variant}
           value={urlExpression}
           onChange={(newExpression) =>

@@ -9,13 +9,15 @@ import { restAssetsUploadPath, restAssetsPath } from "~/shared/router-utils";
 import { fetch } from "~/shared/fetch.client";
 import type { AssetActionResponse } from "~/builder/shared/assets";
 import {
-  $assets,
   $authToken,
-  $project,
   $uploadingFilesDataStore,
   type UploadingFileData,
 } from "~/shared/nano-states";
+import { $assets } from "~/shared/sync/data-stores";
+import { $project } from "~/shared/sync/data-stores";
 import { serverSyncStore } from "~/shared/sync/sync-stores";
+import { onNextTransactionComplete } from "~/shared/sync/project-queue";
+import { invalidateAssets } from "~/shared/resources";
 import {
   formatAssetName,
   getFileName,
@@ -38,6 +40,10 @@ const safeDeleteAssets = (assetIds: Asset["id"][], projectId: string) => {
       assets.delete(assetId);
     }
   });
+
+  onNextTransactionComplete(() => {
+    invalidateAssets();
+  });
 };
 
 const safeSetAsset = (asset: Asset, projectId: string) => {
@@ -51,6 +57,10 @@ const safeSetAsset = (asset: Asset, projectId: string) => {
 
   serverSyncStore.createTransaction([$assets], (assets) => {
     assets.set(asset.id, asset);
+  });
+
+  onNextTransactionComplete(() => {
+    invalidateAssets();
   });
 };
 
@@ -135,6 +145,7 @@ const deduplicateAssetName = (name: string, existingNames: Set<string>) => {
 const uploadAsset = async ({
   authToken,
   projectId,
+  assetId,
   fileOrUrl,
   assetType,
   onCompleted,
@@ -142,6 +153,7 @@ const uploadAsset = async ({
 }: {
   authToken: undefined | string;
   projectId: string;
+  assetId: Asset["id"];
   fileOrUrl: File | URL;
   assetType: AssetType;
   onCompleted: (data: AssetActionResponse) => void;
@@ -152,6 +164,7 @@ const uploadAsset = async ({
     const fileName = getFileName(fileOrUrl);
 
     const metaFormData = new FormData();
+    metaFormData.append("assetId", assetId);
     metaFormData.append("projectId", projectId);
     metaFormData.append("type", assetType);
     // sanitizeS3Key here is just because of https://github.com/remix-run/remix/issues/4443
@@ -309,6 +322,7 @@ const processUpload = async (
       await uploadAsset({
         authToken,
         projectId,
+        assetId,
         fileOrUrl:
           fileData.source === "file" ? fileData.file : new URL(fileData.url),
         assetType: fileData.type,

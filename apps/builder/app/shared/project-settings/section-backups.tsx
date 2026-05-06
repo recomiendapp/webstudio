@@ -20,7 +20,7 @@ import {
 import { UpgradeIcon } from "@webstudio-is/icons";
 import { nativeClient, trpcClient } from "~/shared/trpc/trpc-client";
 import { $project } from "~/shared/sync/data-stores";
-import { $userPlanFeatures } from "~/shared/nano-states";
+import { $permissions } from "~/shared/nano-states";
 import { sectionSpacing } from "./utils";
 import cmsUpgradeBanner from "../cms-upgrade-banner.svg?url";
 
@@ -41,7 +41,7 @@ export const SectionBackups = ({
 }: {
   projectId?: string;
 }) => {
-  const { hasProPlan } = useStore($userPlanFeatures);
+  const { canRestoreBackups } = useStore($permissions);
   const { data, load } = trpcClient.project.publishedBuilds.useQuery();
   const project = useStore($project);
   const projectId = projectIdProp ?? project?.id ?? "";
@@ -92,7 +92,7 @@ export const SectionBackups = ({
         <DialogTrigger asChild>
           <Button
             css={{ justifySelf: "start" }}
-            disabled={!hasProPlan || options.length === 0}
+            disabled={canRestoreBackups === false || options.length === 0}
           >
             Restore
           </Button>
@@ -127,7 +127,7 @@ export const SectionBackups = ({
           </Flex>
         </DialogContent>
       </Dialog>
-      {!hasProPlan && (
+      {canRestoreBackups === false && (
         <PanelBanner>
           <img
             src={cmsUpgradeBanner}

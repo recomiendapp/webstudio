@@ -9,11 +9,7 @@ import {
   isComponentDetachable,
   portalComponent,
 } from "@webstudio-is/sdk";
-import {
-  $selectedInstanceSelector,
-  $instances,
-  $project,
-} from "../nano-states";
+import { $instances, $project } from "~/shared/sync/data-stores";
 import type { InstanceSelector } from "../tree-utils";
 import {
   deleteInstanceMutable,
@@ -23,11 +19,15 @@ import {
   getWebstudioData,
   insertInstanceChildrenMutable,
   findClosestInsertable,
-  insertFragmentWithConflictResolution,
+  detectFragmentTokenConflicts,
   type Insertable,
 } from "../instance-utils";
-import { $selectedInstancePath } from "../awareness";
+import {
+  $selectedInstancePath,
+  $selectedInstanceSelector,
+} from "~/shared/nano-states";
 import { findAvailableVariables } from "../data-variables";
+import { builderApi } from "../builder-api";
 import type { Plugin } from "./init-copy-paste";
 
 const version = "@webstudio/instance/v0.1";
@@ -173,9 +173,11 @@ const onPaste = async (clipboardData: string) => {
   }
 
   try {
-    const conflictResolution = await insertFragmentWithConflictResolution({
-      fragment,
-    });
+    const conflicts = detectFragmentTokenConflicts({ fragment });
+    const conflictResolution =
+      conflicts.length > 0
+        ? await builderApi.showTokenConflictDialog(conflicts)
+        : "theirs";
     updateWebstudioData((data) => {
       const { newInstanceIds } = insertWebstudioFragmentCopy({
         data,

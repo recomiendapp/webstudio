@@ -10,6 +10,7 @@ import {
   addRepeatedStyleItem,
   deleteRepeatedStyleItem,
   editRepeatedStyleItem,
+  getComputedRepeatedItem,
   getRepeatedStyleItem,
   setRepeatedStyleItem,
   swapRepeatedStyleItems,
@@ -17,18 +18,21 @@ import {
 } from "./repeated-style";
 import { createComputedStyleDeclStore } from "./model";
 import { parseCssFragment } from "./css-fragment";
+import { $selectedBreakpointId } from "~/shared/nano-states";
+import { $breakpoints } from "~/shared/sync/data-stores";
 import {
-  $breakpoints,
   $instances,
-  $selectedBreakpointId,
   $styles,
   $styleSources,
   $styleSourceSelections,
-} from "~/shared/nano-states";
+} from "~/shared/sync/data-stores";
 import { registerContainers } from "~/shared/sync/sync-stores";
 import { setProperty } from "./use-style-data";
 import type { ComputedStyleDecl } from "~/shared/style-object-model";
-import { $awareness } from "~/shared/awareness";
+import {
+  $selectedPageId,
+  $selectedInstanceSelector,
+} from "~/shared/nano-states";
 
 setEnv("*");
 registerContainers();
@@ -36,10 +40,8 @@ registerContainers();
 beforeEach(() => {
   $breakpoints.set(new Map([["base", { id: "base", label: "" }]]));
   $selectedBreakpointId.set("base");
-  $awareness.set({
-    pageId: "",
-    instanceSelector: ["box"],
-  });
+  $selectedPageId.set("");
+  $selectedInstanceSelector.set(["box"]);
   $instances.set(
     new Map([
       ["box", { type: "instance", id: "box", component: "Box", children: [] }],
@@ -108,7 +110,7 @@ describe("add repeated item", () => {
     expect($transitionProperty.get().cascadedValue.type).toEqual("var");
     addRepeatedStyleItem(
       [$transitionProperty.get()],
-      parseCssFragment("opacity", ["transition-property"])
+      parseCssFragment("opacity", ["transition-property"]).styles
     );
     expect(toValue($transitionProperty.get().cascadedValue)).toEqual(
       "var(--my-property), opacity"
@@ -121,11 +123,11 @@ describe("add repeated item", () => {
     );
     addRepeatedStyleItem(
       [$transitionProperty.get()],
-      parseCssFragment("opacity", ["transition-property"])
+      parseCssFragment("opacity", ["transition-property"]).styles
     );
     addRepeatedStyleItem(
       [$transitionProperty.get()],
-      parseCssFragment("transform", ["transition-property"])
+      parseCssFragment("transform", ["transition-property"]).styles
     );
     expect(toValue($transitionProperty.get().cascadedValue)).toEqual(
       "opacity, transform"
@@ -136,11 +138,11 @@ describe("add repeated item", () => {
     const $filter = createComputedStyleDeclStore("filter");
     addRepeatedStyleItem(
       [$filter.get()],
-      parseCssFragment("blur(5px)", ["filter"])
+      parseCssFragment("blur(5px)", ["filter"]).styles
     );
     addRepeatedStyleItem(
       [$filter.get()],
-      parseCssFragment("brightness(0.5)", ["filter"])
+      parseCssFragment("brightness(0.5)", ["filter"]).styles
     );
     expect(toValue($filter.get().cascadedValue)).toEqual(
       "blur(5px) brightness(0.5)"
@@ -151,7 +153,7 @@ describe("add repeated item", () => {
     const $backgroundColor = createComputedStyleDeclStore("background-color");
     addRepeatedStyleItem(
       [$backgroundColor.get()],
-      parseCssFragment("none", ["background"])
+      parseCssFragment("none", ["background"]).styles
     );
     expect($backgroundColor.get().source.name).toEqual("default");
     expect(toValue($backgroundColor.get().cascadedValue)).toEqual(
@@ -175,7 +177,7 @@ describe("add repeated item", () => {
         $transitionDuration.get(),
         $transitionDelay.get(),
       ],
-      parseCssFragment("width 2s", ["transition"])
+      parseCssFragment("width 2s", ["transition"]).styles
     );
     expect(toValue($transitionProperty.get().cascadedValue)).toEqual(
       "opacity, transform, width"
@@ -194,7 +196,7 @@ describe("edit item in repeated style", () => {
     editRepeatedStyleItem(
       [$backgroundImage.get()],
       0,
-      parseCssFragment("var(--gradient1)", ["background-image"])
+      parseCssFragment("var(--gradient1)", ["background-image"]).styles
     );
     expect(toValue($backgroundImage.get().cascadedValue)).toEqual(
       "var(--gradient1)"
@@ -204,7 +206,7 @@ describe("edit item in repeated style", () => {
       [$backgroundImage.get()],
       // use greater index when access computed items
       2,
-      parseCssFragment("var(--gradient2)", ["background-image"])
+      parseCssFragment("var(--gradient2)", ["background-image"]).styles
     );
     expect(toValue($backgroundImage.get().cascadedValue)).toEqual(
       "var(--gradient2)"
@@ -218,7 +220,7 @@ describe("edit item in repeated style", () => {
     editRepeatedStyleItem(
       [$backgroundImage.get()],
       1,
-      parseCssFragment("var(--gradient1)", ["background-image"])
+      parseCssFragment("var(--gradient1)", ["background-image"]).styles
     );
     expect(toValue($backgroundImage.get().cascadedValue)).toEqual(
       "none, var(--gradient1)"
@@ -227,7 +229,7 @@ describe("edit item in repeated style", () => {
     editRepeatedStyleItem(
       [$backgroundImage.get()],
       1,
-      parseCssFragment("var(--gradient2)", ["background-image"])
+      parseCssFragment("var(--gradient2)", ["background-image"]).styles
     );
     expect(toValue($backgroundImage.get().cascadedValue)).toEqual(
       "none, var(--gradient2)"
@@ -243,7 +245,7 @@ describe("edit item in repeated style", () => {
     editRepeatedStyleItem(
       [$transitionProperty.get()],
       1,
-      parseCssFragment("width", ["transition-property"])
+      parseCssFragment("width", ["transition-property"]).styles
     );
     expect(toValue($transitionProperty.get().cascadedValue)).toEqual(
       "opacity, width"
@@ -256,7 +258,7 @@ describe("edit item in repeated style", () => {
     editRepeatedStyleItem(
       [$filter.get()],
       1,
-      parseCssFragment("contrast(200%)", ["filter"])
+      parseCssFragment("contrast(200%)", ["filter"]).styles
     );
     expect(toValue($filter.get().cascadedValue)).toEqual(
       "blur(5px) contrast(200%)"
@@ -476,6 +478,53 @@ describe("toggle repeated item", () => {
     );
     // color should not switch to 1s when hide first layer
     expect(toValue($transitionDuration.get().cascadedValue)).toEqual("2s, 1s");
+  });
+
+  test("preserves computed layer mapping for hidden box shadows", () => {
+    const $boxShadow = createComputedStyleDeclStore("box-shadow");
+    setRawProperty(
+      "box-shadow",
+      "1px 2px 3px red, inset 4px 5px 6px blue, 7px 8px 9px green"
+    );
+
+    toggleRepeatedStyleItem([$boxShadow.get()], 0);
+
+    expect(getComputedRepeatedItem($boxShadow.get(), 0)).toMatchObject({
+      type: "shadow",
+      hidden: true,
+      position: "outset",
+    });
+    expect(getComputedRepeatedItem($boxShadow.get(), 1)).toMatchObject({
+      type: "shadow",
+      position: "inset",
+    });
+    expect(getComputedRepeatedItem($boxShadow.get(), 2)).toMatchObject({
+      type: "shadow",
+      position: "outset",
+      offsetX: { type: "unit", unit: "px", value: 7 },
+      offsetY: { type: "unit", unit: "px", value: 8 },
+      blur: { type: "unit", unit: "px", value: 9 },
+    });
+  });
+
+  test("preserves computed layer mapping for hidden text shadows", () => {
+    const $textShadow = createComputedStyleDeclStore("text-shadow");
+    setRawProperty("text-shadow", "1px 2px 3px red, 4px 5px 6px blue");
+
+    toggleRepeatedStyleItem([$textShadow.get()], 0);
+
+    expect(getComputedRepeatedItem($textShadow.get(), 0)).toMatchObject({
+      type: "shadow",
+      hidden: true,
+      position: "outset",
+    });
+    expect(getComputedRepeatedItem($textShadow.get(), 1)).toMatchObject({
+      type: "shadow",
+      position: "outset",
+      offsetX: { type: "unit", unit: "px", value: 4 },
+      offsetY: { type: "unit", unit: "px", value: 5 },
+      blur: { type: "unit", unit: "px", value: 6 },
+    });
   });
 });
 

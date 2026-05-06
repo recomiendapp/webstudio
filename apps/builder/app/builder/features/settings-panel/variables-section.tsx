@@ -22,14 +22,14 @@ import {
 import { EllipsesIcon, PlusIcon } from "@webstudio-is/icons";
 import type { DataSource } from "@webstudio-is/sdk";
 import { findPageByIdOrPath } from "@webstudio-is/sdk";
+import { $variableValuesByInstanceSelector } from "~/shared/nano-states";
+import { $dataSources } from "~/shared/sync/data-stores";
 import {
-  $dataSources,
   $instances,
   $pages,
   $props,
   $resources,
-  $variableValuesByInstanceSelector,
-} from "~/shared/nano-states";
+} from "~/shared/sync/data-stores";
 import {
   CollapsibleSectionRoot,
   useOpenState,
@@ -40,7 +40,7 @@ import {
   $selectedInstance,
   $selectedInstanceKeyWithRoot,
   $selectedPage,
-} from "~/shared/awareness";
+} from "~/shared/nano-states";
 import { updateWebstudioData } from "~/shared/instance-utils";
 import {
   deleteVariableMutable,
@@ -100,7 +100,7 @@ const EmptyVariables = () => {
   return (
     <Flex direction="column" gap="2">
       <Flex justify="center" align="center">
-        <Text variant="labelsSentenceCase" align="center">
+        <Text variant="labels" align="center">
           No data variables created
           <br /> on this instance
         </Text>
@@ -264,7 +264,7 @@ const VariablesList = () => {
   );
 };
 
-const label = "Data Variables";
+const label = "Data variables";
 
 export const VariablesSection = () => {
   const [isOpen, setIsOpen] = useOpenState(label);
@@ -290,7 +290,7 @@ export const VariablesSection = () => {
             </VariablePopoverTrigger>
           }
         >
-          <SectionTitleLabel>Data Variables</SectionTitleLabel>
+          <SectionTitleLabel>Data variables</SectionTitleLabel>
         </SectionTitle>
       }
     >

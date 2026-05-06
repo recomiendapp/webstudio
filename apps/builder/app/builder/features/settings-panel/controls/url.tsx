@@ -20,15 +20,19 @@ import {
   PageIcon,
   PhoneIcon,
 } from "@webstudio-is/icons";
-import type { Folder, Instance, Page } from "@webstudio-is/sdk";
 import {
   findParentFolderByChildId,
   findTreeInstanceIds,
+  getAllPages,
+  type Folder,
+  type Instance,
+  type Page,
 } from "@webstudio-is/sdk";
 import { $instances, $pages, $props } from "~/shared/sync/data-stores";
 import {
   BindingControl,
   BindingPopover,
+  validatePrimitiveValue,
 } from "~/builder/shared/binding-popover";
 import {
   type ControlProps,
@@ -265,7 +269,7 @@ const BaseEmail = ({
 const instancesPerPageStore = computed(
   [$instances, $pages],
   (instances, pages) =>
-    (pages ? [pages.homePage, ...pages.pages] : []).map((page) => ({
+    (pages ? getAllPages(pages) : []).map((page) => ({
       pageId: page.id,
       instancesIds: findTreeInstanceIds(instances, page.rootInstanceId),
     }))
@@ -309,7 +313,7 @@ const getInstanceId = (data: { instanceId: string }) => data.instanceId;
 const BasePage = ({ prop, onChange }: BaseControlProps) => {
   const pages = useStore($pages);
   const { allPages, pageSelectOptions } = useMemo(() => {
-    const allPages = pages ? [pages.homePage, ...pages.pages] : [];
+    const allPages = pages ? getAllPages(pages) : [];
     const rootFolder = createRootFolder();
     const pageSelectOptions = new Map<
       Folder["id"],
@@ -521,11 +525,7 @@ export const UrlControl = ({
         <BindingPopover
           scope={scope}
           aliases={aliases}
-          validate={(value) => {
-            if (value !== undefined && typeof value !== "string") {
-              return `${label} expects a string value, page or file`;
-            }
-          }}
+          validate={(value) => validatePrimitiveValue(value, label)}
           variant={variant}
           value={expression}
           onChange={(newExpression) =>

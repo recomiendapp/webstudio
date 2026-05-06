@@ -4,17 +4,19 @@ import { TooltipProvider } from "@radix-ui/react-tooltip";
 import {
   theme,
   Box,
+  Toaster,
   type CSS,
   Flex,
   Grid,
   rawTheme,
 } from "@webstudio-is/design-system";
 import type { AuthPermit } from "@webstudio-is/trpc-interface/index.server";
+import type { Role } from "@webstudio-is/project";
 import { initializeClientSync, getSyncClient } from "~/shared/sync/sync-client";
 import { usePreventUnload } from "~/shared/sync/project-queue";
 import { usePublish, $publisher } from "~/shared/pubsub";
 import { Inspector } from "./inspector";
-import { Topbar } from "./features/topbar";
+import { Topbar } from "./shared/topbar";
 import { Footer } from "./features/footer";
 import {
   CanvasIframe,
@@ -25,17 +27,17 @@ import {
   $authPermit,
   $authToken,
   $isPreviewMode,
-  $pages,
-  $project,
   subscribeResources,
   $authTokenPermissions,
   $isDesignMode,
   $isContentMode,
-  $userPlanFeatures,
+  setSharedStores,
   subscribeModifierKeys,
   $stagingUsername,
   $stagingPassword,
+  $user,
 } from "~/shared/nano-states";
+import { $project } from "~/shared/sync/data-stores";
 import { $settings, type Settings } from "./shared/client-settings";
 import { builderUrl, getCanvasUrl } from "~/shared/router-utils";
 import { BlockingAlerts } from "./features/blocking-alerts";
@@ -43,27 +45,30 @@ import { useSyncPageUrl } from "~/shared/pages";
 import { useMount, useUnmount } from "~/shared/hook-utils/use-mount";
 import { subscribeCommands } from "~/builder/shared/commands";
 import { ProjectSettings } from "~/shared/project-settings";
-import type { UserPlanFeatures } from "~/shared/db/user-plan-features.server";
+import type { PlanFeatures, Purchase } from "@webstudio-is/plans";
 import {
   $activeSidebarPanel,
   $dataLoadingState,
   $isCloneDialogOpen,
   $loadingState,
 } from "./shared/nano-states";
+import { $pages } from "~/shared/sync/data-stores";
 import { CloneProjectDialog } from "~/shared/clone-project";
 import type { TokenPermissions } from "@webstudio-is/authorization-token";
 import { useToastErrors } from "~/shared/error/toast-error";
 import { initBuilderApi } from "~/shared/builder-api";
 import { updateWebstudioData } from "~/shared/instance-utils";
-import { migrateWebstudioDataMutable } from "~/shared/webstudio-data-migrator";
+import { migrateWebstudioDataMutable } from "@webstudio-is/project-migrations";
 import { Loading, LoadingBackground } from "./shared/loading";
 import { mergeRefs } from "@react-aria/utils";
 import { CommandPanel } from "./features/command-panel";
 import { DeleteUnusedTokensDialog } from "~/builder/shared/style-source-actions";
 import { DeleteUnusedDataVariablesDialog } from "~/builder/shared/data-variable-utils";
 import { DeleteUnusedCssVariablesDialog } from "~/builder/shared/css-variable-utils";
+import { DeleteUnusedAssetsDialog } from "~/builder/shared/asset-manager/delete-unused-assets";
 import { KeyboardShortcutsDialog } from "./features/keyboard-shortcuts-dialog";
 import { TokenConflictDialog } from "~/shared/token-conflict-dialog";
+import type { User } from "~/shared/db/user.server";
 
 import {
   initCopyPaste,
@@ -72,6 +77,10 @@ import {
 import { useInertHandlers } from "./shared/inert-handlers";
 import { TextToolbar } from "./features/workspace/canvas-tools/text-toolbar";
 import { RemoteDialog } from "./features/help/remote-dialog";
+import {
+  startSubscription,
+  stopSubscription,
+} from "~/shared/notifications/subscription";
 import type { SidebarPanelName } from "./sidebar-left/types";
 import { SidebarLeft } from "./sidebar-left/sidebar-left";
 import { useDisableContextMenu } from "./shared/use-disable-context-menu";
@@ -224,28 +233,33 @@ export type BuilderProps = {
   projectId: string;
   authToken?: string;
   authPermit: AuthPermit;
+  user?: User;
+  role: Role | "own";
   authTokenPermissions: TokenPermissions;
-  userPlanFeatures: UserPlanFeatures;
+  planFeatures: PlanFeatures;
+  purchases: Array<Purchase>;
   stagingUsername: string;
   stagingPassword: string;
 };
 
-export const Builder = ({
-  projectId,
-  authToken,
-  authPermit,
-  userPlanFeatures,
-  authTokenPermissions,
-  stagingUsername,
-  stagingPassword,
-}: BuilderProps) => {
+export const Builder = (props: BuilderProps) => {
+  const {
+    projectId,
+    authToken,
+    authPermit,
+    authTokenPermissions,
+    stagingUsername,
+    stagingPassword,
+  } = props;
+
   useMount(initBuilderApi);
 
   useMount(() => {
     // additional data stores
     $authPermit.set(authPermit);
     $authToken.set(authToken);
-    $userPlanFeatures.set(userPlanFeatures);
+    $user.set(props.user);
+    setSharedStores(props);
     $authTokenPermissions.set(authTokenPermissions);
     $stagingUsername.set(stagingUsername);
     $stagingPassword.set(stagingPassword);
@@ -281,6 +295,10 @@ export const Builder = ({
   useToastErrors();
   useEffect(subscribeCommands, []);
   useEffect(subscribeResources, []);
+  useEffect(() => {
+    startSubscription();
+    return stopSubscription;
+  }, []);
   useDisableContextMenu();
 
   useUnmount(() => {
@@ -434,10 +452,12 @@ export const Builder = ({
           >
             <Inspector navigatorLayout={navigatorLayout} />
           </SidePanel>
+          <Main css={{ pointerEvents: "none" }}>
+            <CanvasToolsContainer />
+          </Main>
           {project ? (
             <Topbar
               project={project}
-              hasProPlan={userPlanFeatures.hasProPlan}
               css={{ gridArea: "header" }}
               loading={
                 <LoadingBackground
@@ -475,9 +495,11 @@ export const Builder = ({
         <DeleteUnusedTokensDialog />
         <DeleteUnusedDataVariablesDialog />
         <DeleteUnusedCssVariablesDialog />
+        <DeleteUnusedAssetsDialog />
         <KeyboardShortcutsDialog />
         <TokenConflictDialog />
         <RemoteDialog />
+        <Toaster />
       </div>
     </TooltipProvider>
   );

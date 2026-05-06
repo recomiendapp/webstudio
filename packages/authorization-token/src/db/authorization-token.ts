@@ -1,4 +1,4 @@
-import type { Database } from "@webstudio-is/postrest/index.server";
+import type { Database } from "@webstudio-is/postgrest/index.server";
 import {
   type AppContext,
   authorizeProject,
@@ -242,3 +242,5 @@ export const remove = async (
 
   return dbToken.data;
 };
+
+export const __testing__ = { applyTokenPermissions };

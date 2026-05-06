@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import * as projectApi from "@webstudio-is/project/index.server";
-import { createProductionBuild } from "@webstudio-is/project-build/index.server";
+import {
+  createProductionBuild,
+  unpublishBuild,
+} from "@webstudio-is/project-build/index.server";
 import {
   router,
   procedure,
@@ -138,7 +141,7 @@ export const domainRouter = router({
         }
         console.log('mutate ', input);
         const result = await deploymentTrpc.publish.mutate({
-          // used to load build data from the builder see routes/rest.build.$buildId.ts
+          // used to load build data from the builder with build.loadProjectDataByBuildId
           builderOrigin: env.BUILDER_ORIGIN,
           githubSha: env.GITHUB_SHA,
           buildId: build.id,
@@ -184,6 +187,55 @@ export const domainRouter = router({
       }
     }),
   /**
+   * Unpublish a specific domain from the project
+   */
+  unpublish: procedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        domain: z.string(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      try {
+        const { deploymentTrpc, env } = ctx.deployment;
+
+        // Call deployment service to delete the worker for this domain
+        const result = await deploymentTrpc.unpublish.mutate({
+          domain: input.domain,
+        });
+
+        // Extract subdomain for DB lookup (strip publisher host suffix)
+        // e.g., "myproject.wstd.work" → "myproject", "custom.com" → "custom.com"
+        const dbDomain = input.domain.replace(`.${env.PUBLISHER_HOST}`, "");
+
+        // Always unpublish in DB regardless of worker deletion result
+        await unpublishBuild(
+          { projectId: input.projectId, domain: dbDomain },
+          ctx
+        );
+
+        // If worker deletion failed (and not NOT_IMPLEMENTED), return error
+        if (result.success === false && result.error !== "NOT_IMPLEMENTED") {
+          return {
+            success: false,
+            message: `Failed to unpublish ${input.domain}: ${result.error}`,
+          };
+        }
+
+        return {
+          success: true,
+          message: `${input.domain} unpublished`,
+        };
+      } catch (error) {
+        console.error("Unpublish failed:", error);
+        return {
+          success: false,
+          message: `Failed to unpublish ${input.domain}: ${error instanceof Error ? error.message : "Unknown error"}`,
+        };
+      }
+    }),
+  /**
    * Update *.wstd.* domain
    */
   updateProjectDomain: procedure
@@ -222,16 +274,13 @@ export const domainRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        const { userPlanFeatures } = ctx;
-        if (userPlanFeatures === undefined) {
-          throw new Error("Missing userPlanFeatures");
-        }
+        const { planFeatures } = ctx;
 
         return await db.create(
           {
             projectId: input.projectId,
             domain: input.domain,
-            maxDomainsAllowedPerUser: userPlanFeatures.maxDomainsAllowedPerUser,
+            maxDomainsAllowedPerUser: planFeatures.maxDomainsAllowedPerUser,
           },
           ctx
         );

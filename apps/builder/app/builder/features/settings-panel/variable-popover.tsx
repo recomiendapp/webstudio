@@ -54,17 +54,15 @@ import {
   formatValue,
 } from "~/builder/shared/expression-editor";
 import {
-  $dataSources,
-  $resources,
-  $userPlanFeatures,
-  $instances,
-  $props,
+  $permissions,
   $variableValuesByInstanceSelector,
 } from "~/shared/nano-states";
+import { $dataSources } from "~/shared/sync/data-stores";
+import { $resources, $instances, $props } from "~/shared/sync/data-stores";
 import {
   $selectedInstance,
   $selectedInstanceKeyWithRoot,
-} from "~/shared/awareness";
+} from "~/shared/nano-states";
 import {
   EditorContent,
   EditorDialog,
@@ -192,7 +190,7 @@ const TypeField = ({
   value: VariableType;
   onChange: (value: VariableType) => void;
 }) => {
-  const { allowDynamicData } = useStore($userPlanFeatures);
+  const { allowDynamicData } = useStore($permissions);
   const optionsList: Array<{
     value: VariableType;
     disabled?: boolean;
@@ -559,7 +557,7 @@ const VariablePanelForm = forwardRef<
     { variable, variableType, onVariableTypeChange, value, onValueChange },
     ref
   ) => {
-    const { allowDynamicData } = useStore($userPlanFeatures);
+    const { allowDynamicData } = useStore($permissions);
 
     const isResource =
       variableType === "resource" ||

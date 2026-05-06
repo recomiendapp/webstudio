@@ -37,9 +37,6 @@ import {
   WebstudioComponentPreview,
 } from "./features/webstudio-component";
 import {
-  $assets,
-  $pages,
-  $instances,
   registerComponentLibrary,
   $registeredComponents,
   subscribeComponentHooks,
@@ -48,14 +45,15 @@ import {
   $isContentMode,
   subscribeModifierKeys,
   assetBaseUrl,
-  $breakpoints,
 } from "~/shared/nano-states";
+import { $assets } from "~/shared/sync/data-stores";
+import { $pages, $instances, $breakpoints } from "~/shared/sync/data-stores";
 import { useDragAndDrop } from "./shared/use-drag-drop";
 import {
   initCopyPaste,
   initCopyPasteForContentEditMode,
 } from "~/shared/copy-paste/init-copy-paste";
-import { setDataCollapsed, subscribeCollapsed } from "./collapsed";
+import { inflateInstance, subscribeInflator } from "./inflator";
 import { useWindowResizeDebounced } from "~/shared/dom-hooks";
 import { subscribeInstanceSelection } from "./instance-selection";
 import { subscribeInstanceHovering } from "./instance-hovering";
@@ -67,14 +65,16 @@ import { updateCollaborativeInstanceRect } from "./collaborative-instance";
 import { initCanvasApi } from "~/shared/canvas-api";
 import { subscribeFontLoadingDone } from "./shared/font-weight-support";
 import { subscribeSelected } from "./instance-selected";
+import { subscribeGridGuidesOnSelected } from "./grid-guide-utils";
 import { subscribeScrollNewInstanceIntoView } from "./shared/scroll-new-instance-into-view";
-import { $selectedPage } from "~/shared/awareness";
+import { $selectedPage } from "~/shared/nano-states";
 import { createInstanceElement } from "./elements";
 import { subscribeScrollbarSize } from "./scrollbar-width";
 import { compareMedia } from "@webstudio-is/css-engine";
 import { builderApi } from "~/shared/builder-api";
 import { useDebounceEffect } from "@webstudio-is/design-system";
 import { subscribeInstanceContextMenu } from "./instance-context-menu";
+import { startPointerTracking } from "~/shared/awareness";
 
 registerContainers();
 
@@ -107,6 +107,7 @@ const handleError = (error: unknown) => {
 };
 
 const useElementsTree = (components: Components, instances: Instances) => {
+  const isSafeMode = builderApi.isSafeMode();
   const page = useStore($selectedPage);
   const isPreviewMode = useStore($isPreviewMode);
   const breakpointsMap = useStore($breakpoints);
@@ -117,7 +118,7 @@ const useElementsTree = (components: Components, instances: Instances) => {
 
     console.info({
       $assets: $assets.get().size,
-      $pages: $pages.get()?.pages.length ?? 0,
+      $pages: $pages.get()?.pages.size ?? 0,
       $instances: $instances.get().size,
     });
   }
@@ -132,6 +133,7 @@ const useElementsTree = (components: Components, instances: Instances) => {
       <ReactSdkContext.Provider
         value={{
           renderer: isPreviewMode ? "preview" : "canvas",
+          isSafeMode,
           assetBaseUrl,
           imageLoader: wsImageLoader,
           videoLoader: wsVideoLoader,
@@ -152,7 +154,14 @@ const useElementsTree = (components: Components, instances: Instances) => {
         })}
       </ReactSdkContext.Provider>
     );
-  }, [instances, rootInstanceId, components, isPreviewMode, breakpoints]);
+  }, [
+    instances,
+    rootInstanceId,
+    components,
+    isPreviewMode,
+    breakpoints,
+    isSafeMode,
+  ]);
 };
 
 const DesignMode = () => {
@@ -169,8 +178,10 @@ const DesignMode = () => {
       abortController.signal
     );
     const unsubscribeSelected = subscribeSelected(debounceEffect);
+    const unsubscribeGridGuides = subscribeGridGuidesOnSelected();
     return () => {
       unsubscribeSelected();
+      unsubscribeGridGuides();
       abortController.abort();
     };
   }, [debounceEffect]);
@@ -209,8 +220,10 @@ const ContentEditMode = () => {
       abortController.signal
     );
     const unsubscribeSelected = subscribeSelected(debounceEffect);
+    const unsubscribeGridGuides = subscribeGridGuidesOnSelected();
     return () => {
       unsubscribeSelected();
+      unsubscribeGridGuides();
       abortController.abort();
     };
   }, [debounceEffect]);
@@ -286,18 +299,20 @@ export const Canvas = () => {
   useEffect(() => {
     const rootInstanceId = selectedPage?.rootInstanceId;
     if (rootInstanceId !== undefined) {
-      setDataCollapsed(rootInstanceId);
+      inflateInstance(rootInstanceId);
     }
   });
 
   useWindowResizeDebounced(() => {
     const rootInstanceId = selectedPage?.rootInstanceId;
     if (rootInstanceId !== undefined) {
-      setDataCollapsed(rootInstanceId);
+      inflateInstance(rootInstanceId);
     }
   });
 
-  useEffect(subscribeCollapsed, []);
+  useEffect(subscribeInflator, []);
+
+  useEffect(() => startPointerTracking(), []);
 
   useHashLinkSync();
 

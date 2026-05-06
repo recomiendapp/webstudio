@@ -1,11 +1,12 @@
 import type { JSX } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { StorySection } from "@webstudio-is/design-system";
 import { ProjectSettingsDialog } from "./project-settings";
 import { $pages, $project } from "~/shared/sync/data-stores";
 import type { Project } from "@webstudio-is/project";
 
 export default {
-  title: "Project Settings",
+  title: "Project settings",
   component: ProjectSettingsDialog,
 };
 
@@ -24,21 +25,41 @@ export const General = () => {
   const router = createRouter(
     <ProjectSettingsDialog currentSection="general" />
   );
-  return <RouterProvider router={router} />;
+  return (
+    <StorySection title="General">
+      <RouterProvider router={router} />
+    </StorySection>
+  );
 };
 
 export const Redirects = () => {
   $pages.set({
-    homePage: {
-      id: "pageId",
-      name: "My Name",
-      path: "",
-      title: `"My Title"`,
-      meta: {},
-      rootInstanceId: "body",
-    },
-    pages: [],
-    folders: [],
+    homePageId: "pageId",
+    rootFolderId: "root",
+    pages: new Map([
+      [
+        "pageId",
+        {
+          id: "pageId",
+          name: "My Name",
+          path: "",
+          title: `"My Title"`,
+          meta: {},
+          rootInstanceId: "body",
+        },
+      ],
+    ]),
+    folders: new Map([
+      [
+        "root",
+        {
+          id: "root",
+          name: "",
+          slug: "",
+          children: ["pageId"],
+        },
+      ],
+    ]),
     redirects: [
       { old: "/old", new: "/new" },
       { old: "/old", new: "https://google.com" },
@@ -53,5 +74,9 @@ export const Redirects = () => {
   const router = createRouter(
     <ProjectSettingsDialog currentSection="redirects" />
   );
-  return <RouterProvider router={router} />;
+  return (
+    <StorySection title="Redirects">
+      <RouterProvider router={router} />
+    </StorySection>
+  );
 };

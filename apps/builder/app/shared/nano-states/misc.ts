@@ -1,7 +1,18 @@
 import type { Simplify } from "type-fest";
 import { atom, computed, onSet } from "nanostores";
+import {
+  $workspaceRole,
+  $workspaces,
+} from "~/dashboard/workspace/workspace-stores";
 import { nanoid } from "nanoid";
 import type { AuthPermit } from "@webstudio-is/trpc-interface/index.server";
+import {
+  defaultPlanFeatures,
+  type PlanFeatures,
+  type Purchase,
+} from "@webstudio-is/plans";
+import type { Role } from "@webstudio-is/project";
+import type { User } from "~/shared/db/user.server";
 import { toast, type Placement } from "@webstudio-is/design-system";
 import type {
   Instance,
@@ -15,35 +26,17 @@ import type { TokenPermissions } from "@webstudio-is/authorization-token";
 import type { AssetType } from "@webstudio-is/asset-uploader";
 import type { DragStartPayload } from "~/canvas/shared/use-drag-drop";
 import { type InstanceSelector } from "../tree-utils";
-import type { ChildrenOrientation } from "node_modules/@webstudio-is/design-system/src/components/primitives/dnd/geometry-utils";
-import { $awareness, $selectedInstance } from "../awareness";
-import type { UserPlanFeatures } from "../db/user-plan-features.server";
+import type { ChildrenOrientation } from "@webstudio-is/design-system";
+import { $selectedInstance, $selectedInstanceSelector } from "./instances";
+import { getPermissions } from "../permissions";
 import {
   $project,
   $publisherHost,
-  $dataSources,
-  $resources,
   $props,
   $styles,
   $styleSources,
   $styleSourceSelections,
-  $assets,
-  $marketplaceProduct,
 } from "../sync/data-stores";
-
-// Re-export data stores for backward compatibility
-export {
-  $project,
-  $publisherHost,
-  $dataSources,
-  $resources,
-  $props,
-  $styles,
-  $styleSources,
-  $styleSourceSelections,
-  $assets,
-  $marketplaceProduct,
-};
 
 export const $publishedOrigin = computed(
   [$project, $publisherHost],
@@ -78,7 +71,7 @@ export const $selectedStyleSources = atom(
 );
 export const $selectedStyleState = atom<StyleDecl["state"]>();
 // reset style state whenever selected instance change
-onSet($awareness, () => {
+onSet($selectedInstanceSelector, () => {
   $selectedStyleState.set(undefined);
 });
 
@@ -295,16 +288,26 @@ export const $hoveredInstanceSelector = atom<undefined | InstanceSelector>(
   undefined
 );
 
-// keep in sync with user-plan-features.server
-export const $userPlanFeatures = atom<UserPlanFeatures>({
-  allowShareAdminLinks: false,
-  allowDynamicData: false,
-  maxContactEmails: 0,
-  maxDomainsAllowedPerUser: 0,
-  maxPublishesAllowedPerUser: 1,
-  hasSubscription: false,
-  hasProPlan: false,
-});
+export const $planFeatures = atom<PlanFeatures>(defaultPlanFeatures);
+
+export { $workspaceRole, $workspaces };
+export const $purchases = atom<Array<Purchase>>([]);
+
+export const $user = atom<User | undefined>();
+
+/**
+ * Set stores shared between builder and dashboard.
+ * Keep in sync with the atoms above.
+ */
+export const setSharedStores = (data: {
+  planFeatures: PlanFeatures;
+  purchases: Array<Purchase>;
+  role: Role | "own";
+}) => {
+  $planFeatures.set(data.planFeatures);
+  $purchases.set(data.purchases);
+  $workspaceRole.set(data.role);
+};
 
 const builderModes = ["design", "preview", "content"] as const;
 export type BuilderMode = (typeof builderModes)[number];
@@ -337,17 +340,20 @@ export const $authToken = atom<string | undefined>(undefined);
 export const $stagingUsername = atom<string | undefined>();
 export const $stagingPassword = atom<string | undefined>();
 
-export const $isContentModeAllowed = computed(
-  [$authToken, $userPlanFeatures],
-  (token, userPlanFeatures) => {
-    // In own projects, everyone can edit content
-    if (token === undefined) {
-      return true;
-    }
+export const $permissions = computed(
+  [$planFeatures, $authPermit, $workspaceRole, $workspaces],
+  (planFeatures, authPermit, role, workspaces) =>
+    getPermissions({
+      role,
+      planFeatures,
+      authPermit,
+      workspaces,
+    })
+);
 
-    // In shared projects, only Pro users can share editable links, so check the plan features of the user who shared the link
-    return userPlanFeatures.hasProPlan === true;
-  }
+export const $isContentModeAllowed = computed(
+  $permissions,
+  (permissions) => permissions.allowContentMode
 );
 
 export const $isDesignModeAllowed = computed([$authPermit], (authPermit) => {

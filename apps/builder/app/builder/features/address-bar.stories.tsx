@@ -1,10 +1,14 @@
 import { useStore } from "@nanostores/react";
 import type { Meta, StoryFn } from "@storybook/react";
-import { Box, Text, theme } from "@webstudio-is/design-system";
+import { StorySection, Text } from "@webstudio-is/design-system";
+import { ToolbarButton } from "@webstudio-is/design-system";
+import { WebstudioIcon } from "@webstudio-is/icons";
+import { TopbarLayout } from "~/builder/shared/topbar-layout";
 import { AddressBarPopover } from "./address-bar";
 import { $dataSources, $pages } from "~/shared/sync/data-stores";
 import { registerContainers } from "~/shared/sync/sync-stores";
-import { $awareness, $selectedPage } from "~/shared/awareness";
+import { $selectedPage } from "~/shared/nano-states";
+import { $selectedPageId } from "~/shared/nano-states";
 import { $currentSystem } from "~/shared/system";
 
 registerContainers();
@@ -12,32 +16,43 @@ registerContainers();
 $dataSources.set(new Map());
 
 $pages.set({
-  folders: [
-    {
-      id: "rootId",
-      name: "",
-      slug: "",
-      children: ["homeId", "dynamicId"],
-    },
-  ],
-  homePage: {
-    id: "homeId",
-    path: "",
-    name: "",
-    title: "",
-    meta: {},
-    rootInstanceId: "",
-  },
-  pages: [
-    {
-      id: "dynamicId",
-      path: "/blog/:date/post/:slug",
-      name: "",
-      title: "",
-      meta: {},
-      rootInstanceId: "rootInstanceId",
-    },
-  ],
+  homePageId: "homeId",
+  rootFolderId: "rootId",
+  folders: new Map([
+    [
+      "rootId",
+      {
+        id: "rootId",
+        name: "",
+        slug: "",
+        children: ["homeId", "dynamicId"],
+      },
+    ],
+  ]),
+  pages: new Map([
+    [
+      "homeId",
+      {
+        id: "homeId",
+        path: "",
+        name: "",
+        title: "",
+        meta: {},
+        rootInstanceId: "",
+      },
+    ],
+    [
+      "dynamicId",
+      {
+        id: "dynamicId",
+        path: "/blog/:date/post/:slug",
+        name: "",
+        title: "",
+        meta: {},
+        rootInstanceId: "rootInstanceId",
+      },
+    ],
+  ]),
 });
 
 const SystemInspect = () => {
@@ -64,20 +79,19 @@ export default {
 } satisfies Meta;
 
 export const AddressBar: StoryFn = () => {
-  $awareness.set({ pageId: "dynamicId" });
+  $selectedPageId.set("dynamicId");
   return (
-    <>
-      <Box
-        css={{
-          height: theme.spacing[15],
-          background: theme.colors.backgroundTopbar,
-          color: theme.colors.foregroundContrastMain,
-        }}
-      >
-        <AddressBarPopover />
-      </Box>
+    <StorySection title="Address Bar">
+      <TopbarLayout
+        menu={
+          <ToolbarButton aria-label="Menu">
+            <WebstudioIcon size={22} />
+          </ToolbarButton>
+        }
+        left={<AddressBarPopover />}
+      />
       <SystemInspect />
       <HistoryInspect />
-    </>
+    </StorySection>
   );
 };

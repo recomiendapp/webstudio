@@ -41,6 +41,7 @@ import {
 import * as constants from "../constants.mjs";
 import css from "../__generated__/index.css?url";
 import { sitemap } from "../__generated__/$resources.sitemap.xml";
+import { assets } from "../__generated__/$resources.assets";
 
 const customFetch: typeof fetch = (input, init) => {
   if (typeof input !== "string") {
@@ -68,6 +69,12 @@ const customFetch: typeof fetch = (input, init) => {
       timestamp: startOfDay.getTime(),
     };
     const response = new Response(JSON.stringify(data));
+    response.headers.set("content-type", "application/json; charset=utf-8");
+    return Promise.resolve(response);
+  }
+
+  if (isLocalResource(input, "assets")) {
+    const response = new Response(JSON.stringify(assets));
     response.headers.set("content-type", "application/json; charset=utf-8");
     return Promise.resolve(response);
   }
@@ -238,16 +245,21 @@ export const action = async ({
       throw new Error("Form bot field not found");
     }
 
-    const submitTime = parseInt(formBotValue, 16);
-    // Assumes that the difference between the server time and the form submission time,
-    // including any client-server time drift, is within a 5-minute range.
-    // Note: submitTime might be NaN because formBotValue can be any string used for logging purposes.
-    // Example: `formBotValue: jsdom`, or `formBotValue: headless-env`
-    if (
-      Number.isNaN(submitTime) ||
-      Math.abs(Date.now() - submitTime) > 1000 * 60 * 5
-    ) {
-      throw new Error(`Form bot value invalid ${formBotValue}`);
+    // Skip timestamp validation for Brave browser
+    // Brave Shields blocks matchMedia fingerprinting detection used in bot protection
+    // See: https://github.com/brave/brave-browser/issues/46541
+    if (formBotValue !== "brave") {
+      const submitTime = parseInt(formBotValue, 16);
+      // Assumes that the difference between the server time and the form submission time,
+      // including any client-server time drift, is within a 5-minute range.
+      // Note: submitTime might be NaN because formBotValue can be any string used for logging purposes.
+      // Example: `formBotValue: jsdom`, or `formBotValue: headless-env`
+      if (
+        Number.isNaN(submitTime) ||
+        Math.abs(Date.now() - submitTime) > 1000 * 60 * 5
+      ) {
+        throw new Error(`Form bot value invalid ${formBotValue}`);
+      }
     }
 
     formData.delete(formIdFieldName);

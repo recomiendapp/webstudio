@@ -5,6 +5,8 @@ import {
   type ComponentProps,
   type ReactNode,
 } from "react";
+import { type Role, roleLabels } from "@webstudio-is/project";
+import { roleDescriptions } from "~/shared/permissions";
 import {
   Box,
   Button,
@@ -28,12 +30,14 @@ import {
   IconButton,
   Checkbox,
   Grid,
+  PanelBanner,
 } from "@webstudio-is/design-system";
 import {
   CopyIcon,
   EllipsesIcon,
   PlusIcon,
   InfoCircleIcon,
+  UpgradeIcon,
 } from "@webstudio-is/icons";
 import { CopyToClipboard } from "~/shared/copy-to-clipboard";
 import { useIds } from "../form-utils";
@@ -46,6 +50,37 @@ const Item = (props: ComponentProps<typeof Flex>) => (
     gap="1"
     {...props}
   />
+);
+
+const PricingUpgradeLink = ({
+  children = "Upgrade",
+}: {
+  children?: string;
+}) => (
+  <Link
+    className={buttonStyle({ color: "gradient" })}
+    color="contrast"
+    underline="none"
+    href="https://webstudio.is/pricing"
+    target="_blank"
+  >
+    {children}
+  </Link>
+);
+
+export const ShareLinkSecurityNotice = () => (
+  <PanelBanner variant="warning">
+    <Text>
+      Sharing links over insecure channels can expose project access. Upgrade to
+      the Team plan for safer collaboration with realtime multiplayer.
+    </Text>
+    <Flex align="center" gap={1}>
+      <UpgradeIcon />
+      <Link color="inherit" target="_blank" href="https://webstudio.is/pricing">
+        Upgrade
+      </Link>
+    </Flex>
+  </PanelBanner>
 );
 
 type PermissionProps = {
@@ -92,19 +127,25 @@ const Permission = ({
 type MenuProps = {
   name: string;
   value: LinkOptions;
-  hasProPlan: boolean;
+  allowAdditionalPermissions: boolean;
   onChange: (value: LinkOptions) => void;
   onDelete: () => void;
 };
 
-const Menu = ({ name, hasProPlan, value, onChange, onDelete }: MenuProps) => {
+const Menu = ({
+  name,
+  allowAdditionalPermissions,
+  value,
+  onChange,
+  onDelete,
+}: MenuProps) => {
   const ids = useIds(["name", "canClone", "canCopy", "canPublish"]);
   const [isOpen, setIsOpen] = useState(false);
   const [customLinkName, setCustomLinkName] = useState<string>(name);
 
-  const handleCheckedChange = (relation: Relation) => (checked: boolean) => {
+  const handleCheckedChange = (role: Role) => (checked: boolean) => {
     if (checked) {
-      onChange({ ...value, relation });
+      onChange({ ...value, relation: role });
     }
   };
 
@@ -158,26 +199,17 @@ const Menu = ({ name, hasProPlan, value, onChange, onDelete }: MenuProps) => {
           <Permission
             checked={value.relation === "viewers"}
             onCheckedChange={handleCheckedChange("viewers")}
-            title="View"
-            //info="Recipients can view, copy instances and clone the project"
+            title={roleLabels.viewers}
             info={
               <Flex direction="column">
-                Recipients can view, copy instances and clone the project.
-                {hasProPlan !== true && (
+                {roleDescriptions.viewers}
+                {!allowAdditionalPermissions && (
                   <>
                     <br />
                     <br />
                     Upgrade to a Pro account to set additional permissions.
                     <br /> <br />
-                    <Link
-                      className={buttonStyle({ color: "gradient" })}
-                      color="contrast"
-                      underline="none"
-                      href="https://webstudio.is/pricing"
-                      target="_blank"
-                    >
-                      Upgrade
-                    </Link>
+                    <PricingUpgradeLink />
                   </>
                 )}
               </Flex>
@@ -198,7 +230,9 @@ const Menu = ({ name, hasProPlan, value, onChange, onDelete }: MenuProps) => {
               }}
             >
               <Checkbox
-                disabled={hasProPlan !== true || value.relation !== "viewers"}
+                disabled={
+                  !allowAdditionalPermissions || value.relation !== "viewers"
+                }
                 checked={value.canClone}
                 onCheckedChange={(canClone) => {
                   onChange({ ...value, canClone: Boolean(canClone) });
@@ -207,7 +241,9 @@ const Menu = ({ name, hasProPlan, value, onChange, onDelete }: MenuProps) => {
               />
               <Label
                 htmlFor={ids.canClone}
-                disabled={hasProPlan !== true || value.relation !== "viewers"}
+                disabled={
+                  !allowAdditionalPermissions || value.relation !== "viewers"
+                }
               >
                 Can clone
               </Label>
@@ -221,7 +257,9 @@ const Menu = ({ name, hasProPlan, value, onChange, onDelete }: MenuProps) => {
               }}
             >
               <Checkbox
-                disabled={hasProPlan !== true || value.relation !== "viewers"}
+                disabled={
+                  !allowAdditionalPermissions || value.relation !== "viewers"
+                }
                 checked={value.canCopy}
                 onCheckedChange={(canCopy) => {
                   onChange({ ...value, canCopy: Boolean(canCopy) });
@@ -230,7 +268,9 @@ const Menu = ({ name, hasProPlan, value, onChange, onDelete }: MenuProps) => {
               />
               <Label
                 htmlFor={ids.canCopy}
-                disabled={hasProPlan !== true || value.relation !== "viewers"}
+                disabled={
+                  !allowAdditionalPermissions || value.relation !== "viewers"
+                }
               >
                 Can copy
               </Label>
@@ -238,30 +278,21 @@ const Menu = ({ name, hasProPlan, value, onChange, onDelete }: MenuProps) => {
           </Grid>
 
           <Permission
-            disabled={hasProPlan !== true}
+            disabled={!allowAdditionalPermissions}
             onCheckedChange={handleCheckedChange("editors")}
             checked={value.relation === "editors"}
-            title="Content"
+            title={roleLabels.editors}
             info={
               <Flex direction="column">
-                Recipients can edit content only, such as text, images, and
-                predefined components.
-                {hasProPlan !== true && (
+                {roleDescriptions.editors}
+                {!allowAdditionalPermissions && (
                   <>
                     <br />
                     <br />
                     Upgrade to a Pro account to share with Content Edit
                     permissions.
                     <br /> <br />
-                    <Link
-                      className={buttonStyle({ color: "gradient" })}
-                      color="contrast"
-                      underline="none"
-                      href="https://webstudio.is/pricing"
-                      target="_blank"
-                    >
-                      Upgrade
-                    </Link>
+                    <PricingUpgradeLink />
                   </>
                 )}
               </Flex>
@@ -281,7 +312,9 @@ const Menu = ({ name, hasProPlan, value, onChange, onDelete }: MenuProps) => {
               }}
             >
               <Checkbox
-                disabled={hasProPlan !== true || value.relation !== "editors"}
+                disabled={
+                  !allowAdditionalPermissions || value.relation !== "editors"
+                }
                 checked={value.canPublish}
                 onCheckedChange={(canPublish) => {
                   onChange({ ...value, canPublish: Boolean(canPublish) });
@@ -290,7 +323,9 @@ const Menu = ({ name, hasProPlan, value, onChange, onDelete }: MenuProps) => {
               />
               <Label
                 htmlFor={ids.canPublish}
-                disabled={hasProPlan !== true || value.relation !== "editors"}
+                disabled={
+                  !allowAdditionalPermissions || value.relation !== "editors"
+                }
               >
                 Can publish
               </Label>
@@ -300,34 +335,25 @@ const Menu = ({ name, hasProPlan, value, onChange, onDelete }: MenuProps) => {
           <Permission
             onCheckedChange={handleCheckedChange("builders")}
             checked={value.relation === "builders"}
-            title="Build"
-            info="Recipients can make any changes but can not publish the project."
+            title={roleLabels.builders}
+            info={roleDescriptions.builders}
           />
 
           <Permission
-            disabled={hasProPlan !== true}
+            disabled={!allowAdditionalPermissions}
             onCheckedChange={handleCheckedChange("administrators")}
             checked={value.relation === "administrators"}
-            title="Admin"
+            title={roleLabels.administrators}
             info={
               <Flex direction="column">
-                Recipients can make any changes and can also publish the
-                project.
-                {hasProPlan !== true && (
+                {roleDescriptions.administrators}
+                {!allowAdditionalPermissions && (
                   <>
                     <br />
                     <br />
                     Upgrade to a Pro account to share with Admin permissions.
                     <br /> <br />
-                    <Link
-                      className={buttonStyle({ color: "gradient" })}
-                      color="contrast"
-                      underline="none"
-                      href="https://webstudio.is/pricing"
-                      target="_blank"
-                    >
-                      Upgrade
-                    </Link>
+                    <PricingUpgradeLink />
                   </>
                 )}
               </Flex>
@@ -359,12 +385,10 @@ const itemStyle = css({
   backgroundColor: theme.colors.backgroundPanel,
 });
 
-type Relation = "viewers" | "editors" | "builders" | "administrators";
-
 export type LinkOptions = {
   token: string;
   name: string;
-  relation: Relation;
+  relation: Role;
   canCopy: boolean;
   canClone: boolean;
   canPublish: boolean;
@@ -375,10 +399,10 @@ type SharedLinkItemType = {
   onChange: (value: LinkOptions) => void;
   onDelete: () => void;
   builderUrl: (props: { authToken: string; mode: BuilderMode }) => string;
-  hasProPlan: boolean;
+  allowAdditionalPermissions: boolean;
 };
 
-const relationToMode: Record<Relation, BuilderMode> = {
+const relationToMode: Record<Role, BuilderMode> = {
   viewers: "preview",
   editors: "content",
   builders: "design",
@@ -390,7 +414,7 @@ const SharedLinkItem = ({
   onChange,
   onDelete,
   builderUrl,
-  hasProPlan,
+  allowAdditionalPermissions,
 }: SharedLinkItemType) => {
   const [currentName, setCurrentName] = useState(value.name);
 
@@ -416,7 +440,7 @@ const SharedLinkItem = ({
           onChange(value);
         }}
         onDelete={onDelete}
-        hasProPlan={hasProPlan}
+        allowAdditionalPermissions={allowAdditionalPermissions}
       />
     </Box>
   );
@@ -429,7 +453,8 @@ type ShareProjectProps = {
   onCreate: () => void;
   builderUrl: SharedLinkItemType["builderUrl"];
   isPending: boolean;
-  hasProPlan: boolean;
+  allowAdditionalPermissions: boolean;
+  isFreePlan: boolean;
 };
 
 const animateCollapsibleHeight = keyframes({
@@ -456,7 +481,8 @@ export const ShareProject = ({
   onCreate,
   builderUrl,
   isPending,
-  hasProPlan,
+  allowAdditionalPermissions,
+  isFreePlan,
 }: ShareProjectProps) => {
   const items = links.map((link) => (
     <Fragment key={link.token}>
@@ -469,7 +495,7 @@ export const ShareProject = ({
         }}
         builderUrl={builderUrl}
         value={link}
-        hasProPlan={hasProPlan}
+        allowAdditionalPermissions={allowAdditionalPermissions}
       />
       <Separator />
     </Fragment>
@@ -494,6 +520,13 @@ export const ShareProject = ({
 
   return (
     <Flex direction="column" css={{ width: theme.spacing[33] }}>
+      {isFreePlan && (
+        <>
+          <ShareLinkSecurityNotice />
+          <Separator />
+        </>
+      )}
+
       <Collapsible.Root open={items.length > 0}>
         <Collapsible.Content className={collapsibleStyle()}>
           {items}

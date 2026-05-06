@@ -1,11 +1,17 @@
 import { toast } from "@webstudio-is/design-system";
+import type { WebstudioFragment } from "@webstudio-is/sdk";
+import {
+  isAutoGridPlacement,
+  resetGridChildPlacement,
+} from "~/builder/features/style-panel/sections/layout/shared/grid-utils";
 import { createCommandsEmitter, type Command } from "~/shared/commands-emitter";
 import {
   $editingItemSelector,
   $isDesignMode,
+  $isPreviewMode,
   toggleBuilderMode,
-  $project,
 } from "~/shared/nano-states";
+import { $project } from "~/shared/sync/data-stores";
 
 // Declare command for type safety
 declare module "~/shared/pubsub" {
@@ -34,7 +40,8 @@ import {
   setActiveSidebarPanel,
   toggleActiveSidebarPanel,
 } from "./nano-states";
-import { $selectedInstancePath, selectInstance } from "~/shared/awareness";
+import { $selectedInstancePath } from "~/shared/nano-states";
+import { selectInstance } from "~/shared/nano-states";
 import { openCommandPanel } from "../features/command-panel";
 import { showWrapComponentsList } from "../features/command-panel/groups/wrap-group";
 import { showConvertComponentsList } from "../features/command-panel/groups/convert-group";
@@ -48,6 +55,7 @@ import { isSyncIdle } from "~/shared/sync/project-queue";
 import { openDeleteUnusedTokensDialog } from "~/builder/shared/style-source-actions";
 import { openDeleteUnusedDataVariablesDialog } from "~/builder/shared/data-variable-utils";
 import { openDeleteUnusedCssVariablesDialog } from "~/builder/shared/css-variable-utils";
+import { openDeleteUnusedAssetsDialog } from "~/builder/shared/asset-manager/delete-unused-assets";
 import { openKeyboardShortcutsDialog } from "~/builder/features/keyboard-shortcuts-dialog";
 import {
   copyInstance,
@@ -68,6 +76,15 @@ const makeBreakpointCommand = <CommandName extends string>(
     selectBreakpointByOrder(number);
   },
 });
+
+const exitPreviewModeFromNonCanvasSource = (source: string) => {
+  if (source === "canvas") {
+    return;
+  }
+
+  setActiveSidebarPanel("auto");
+  toggleBuilderMode("preview");
+};
 
 export const { emitCommand, subscribeCommands } = createCommandsEmitter({
   source: "builder",
@@ -93,7 +110,12 @@ export const { emitCommand, subscribeCommands } = createCommandsEmitter({
       defaultHotkeys: ["escape"],
       // radix check event.defaultPrevented before invoking callbacks
       preventDefault: false,
-      handler: () => {
+      handler: (source) => {
+        if ($isPreviewMode.get()) {
+          exitPreviewModeFromNonCanvasSource(source);
+          return;
+        }
+
         const { publish } = $publisher.get();
         publish?.({ type: "cancelCurrentDrag" });
       },
@@ -363,6 +385,26 @@ export const { emitCommand, subscribeCommands } = createCommandsEmitter({
           if (newRootInstanceId === undefined) {
             return;
           }
+
+          // When the original child is auto-placed in a grid, ensure the
+          // duplicate is also auto-placed to prevent overlapping items.
+          // Manually positioned children keep their exact grid position.
+          if (
+            isAutoGridPlacement({
+              styles: data.styles,
+              styleSources: data.styleSources,
+              styleSourceSelections: data.styleSourceSelections,
+              instanceId: selectedItem.instance.id,
+            })
+          ) {
+            resetGridChildPlacement({
+              styles: data.styles,
+              styleSources: data.styleSources,
+              styleSourceSelections: data.styleSourceSelections,
+              instanceId: newRootInstanceId,
+            });
+          }
+
           const parentInstance = data.instances.get(parentItem.instance.id);
           if (parentInstance === undefined) {
             return;
@@ -431,10 +473,18 @@ export const { emitCommand, subscribeCommands } = createCommandsEmitter({
       description: "Convert Tailwind to CSS",
       handler: async () => {
         const html = await navigator.clipboard.readText();
-        let fragment = generateFragmentFromHtml(html);
+        const parseResult = generateFragmentFromHtml(html);
+        const { skippedSelectors } = parseResult;
+        let fragment: WebstudioFragment = parseResult;
         fragment = await denormalizeSrcProps(fragment);
         fragment = await generateFragmentFromTailwind(fragment);
-        return insertWebstudioFragmentAt(fragment);
+        const result = insertWebstudioFragmentAt(fragment);
+        if (skippedSelectors.length > 0) {
+          builderApi.toast.info(
+            `Skipped nested selectors (no matching elements): ${skippedSelectors.join(", ")}`
+          );
+        }
+        return result;
       },
     },
 
@@ -531,6 +581,15 @@ export const { emitCommand, subscribeCommands } = createCommandsEmitter({
       description: "Remove unused CSS variables",
       handler: () => {
         openDeleteUnusedCssVariablesDialog();
+      },
+    },
+
+    {
+      name: "deleteUnusedAssets",
+      label: "Delete unused assets",
+      description: "Remove unused assets",
+      handler: () => {
+        openDeleteUnusedAssetsDialog();
       },
     },
 

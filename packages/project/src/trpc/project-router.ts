@@ -7,7 +7,8 @@ import {
   authorizeProject,
   createErrorResponse,
 } from "@webstudio-is/trpc-interface/index.server";
-import { MarketplaceApprovalStatus, Title } from "../shared/schema";
+import { Title } from "../shared/project-schema";
+import { MarketplaceApprovalStatus } from "../shared/marketplace-schema";
 
 export const projectRouter = router({
   rename: procedure
@@ -45,7 +46,7 @@ export const projectRouter = router({
     }),
 
   create: procedure
-    .input(z.object({ title: Title }))
+    .input(z.object({ title: Title, workspaceId: z.string().optional() }))
     .mutation(async ({ input, ctx }) => {
       return await projectApi.create(input, ctx);
     }),
@@ -124,7 +125,17 @@ export const projectRouter = router({
           ctx.authorization.type !== "user" &&
           ctx.authorization.type !== "token"
         ) {
-          throw new Error("Not authorized");
+          throw new AuthorizationError("Not authorized");
+        }
+        const permit = await authorizeProject.getProjectPermit(
+          {
+            projectId: input.projectId,
+            permits: ["view", "build", "admin"],
+          },
+          ctx
+        );
+        if (permit === undefined) {
+          throw new AuthorizationError("Not authorized to access this project");
         }
         const publishedBuilds = await ctx.postgrest.client
           .from("published_builds")
