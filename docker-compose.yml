@@ -17,9 +17,9 @@ services:
       NODE_ENV: production
       TRUST_PROXY: 'true'
       # --- ESTAS SON LAS VARIABLES QUE ARREGLAN EL ERROR DE URL ---
-      APP_URL: 'https://builder.recomiend.app'
-      PUBLIC_URL: 'https://builder.recomiend.app'
-      COOKIE_DOMAIN: '.builder.recomiend.app' # Punto inicial obligatorio
+      APP_URL: 'https://builderstaging.recomiend.app'
+      PUBLIC_URL: 'https://builderstaging.recomiend.app'
+      COOKIE_DOMAIN: '.builderstaging.recomiend.app' # Punto inicial obligatorio
       # -----------------------------------------------------------
       FEATURES: '${FEATURES}'
       USER_PLAN: '${USER_PLAN}'
@@ -31,7 +31,7 @@ services:
     labels:
       - traefik.enable=true
       # Router HTTPS con sintaxis simplificada para que Coolify no falle el build
-      - traefik.http.routers.webstudio-https.rule=Host(`builder.recomiend.app`) || HostRegexp(`^.+\.builder\.recomiend\.app$`)
+      - traefik.http.routers.webstudio-https.rule=Host(`builderstaging.recomiend.app`) || HostRegexp(`^.+\.builderstaging\.recomiend\.app$`)
       - traefik.http.routers.webstudio-https.entryPoints=https
       - traefik.http.routers.webstudio-https.middlewares=gzip
       - traefik.http.routers.webstudio-https.service=webstudio-svc
@@ -41,7 +41,7 @@ services:
       - traefik.http.routers.webstudio-https.priority=100
       
       # Redirección HTTP a HTTPS
-      - traefik.http.routers.webstudio-http.rule=Host(`builder.recomiend.app`) || HostRegexp(`^.+\.builder\.recomiend\.app$`)
+      - traefik.http.routers.webstudio-http.rule=Host(`builderstaging.recomiend.app`) || HostRegexp(`^.+\.builderstaging\.recomiend\.app$`)
       - traefik.http.routers.webstudio-http.entryPoints=http
       - traefik.http.routers.webstudio-http.middlewares=redirect-to-https
 
