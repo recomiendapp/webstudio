@@ -26,6 +26,8 @@ services:
       MAX_ASSETS_PER_PROJECT: '${MAX_ASSETS_PER_PROJECT}'
       MAX_UPLOAD_SIZE: '${MAX_UPLOAD_SIZE}'
       DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT}'
+      AUTH_WS_CLIENT_ID: '${AUTH_WS_CLIENT_ID}'
+      AUTH_WS_CLIENT_SECRET: '${AUTH_WS_CLIENT_SECRET}'
     volumes:
       - webstudio_assets:/app/apps/builder/public/cgi/asset/
     labels:

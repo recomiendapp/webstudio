@@ -1,5 +1,5 @@
 # --- Étape 1 : build ---
-FROM node:20-alpine AS build 
+FROM node:22-alpine AS build
 RUN npm install -g pnpm 
 WORKDIR /app
 
@@ -32,7 +32,7 @@ ENV HTTPS_DISABLE=true
 RUN pnpm -r --filter "@webstudio-is/builder..." run build
 
 # --- Étape 2 : runtime ---
-FROM node:20-alpine 
+FROM node:22-alpine
 RUN npm install -g pnpm 
 WORKDIR /app 
 COPY --from=build /app ./ 
