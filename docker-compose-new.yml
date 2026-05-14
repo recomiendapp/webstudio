@@ -30,7 +30,7 @@ services:
       - webstudio_assets:/app/apps/builder/public/cgi/asset/
     labels:
       - traefik.enable=true
-      - traefik.http.routers.webstudio-https.rule=Host(`builderstaging.recomiend.app`) || HostRegexp(`{subdomain:[a-z0-9-]+}.builderstaging.recomiend.app`)
+      - traefik.http.routers.webstudio-https.rule=Host(`builderstaging.recomiend.app`) || HostRegexp(`^.+\.builderstaging\.recomiend\.app$`)
       - traefik.http.routers.webstudio-https.entryPoints=https
       - traefik.http.routers.webstudio-https.middlewares=gzip
       - traefik.http.routers.webstudio-https.service=webstudio-svc
@@ -40,7 +40,7 @@ services:
       - traefik.http.routers.webstudio-https.tls.domains[0].sans=*.builderstaging.recomiend.app
       - traefik.http.services.webstudio-svc.loadbalancer.server.port=3000
 
-      - traefik.http.routers.webstudio-http.rule=Host(`builderstaging.recomiend.app`) || HostRegexp(`{subdomain:[a-z0-9-]+}.builderstaging.recomiend.app`)
+      - traefik.http.routers.webstudio-http.rule=Host(`builderstaging.recomiend.app`) || HostRegexp(`^.+\.builderstaging\.recomiend\.app$`)
       - traefik.http.routers.webstudio-http.entryPoints=http
       - traefik.http.routers.webstudio-http.middlewares=redirect-to-https
 
