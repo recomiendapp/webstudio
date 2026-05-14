@@ -30,25 +30,20 @@ services:
       - webstudio_assets:/app/apps/builder/public/cgi/asset/
     labels:
       - traefik.enable=true
-      # Router HTTPS con sintaxis simplificada para que Coolify no falle el build
-      - traefik.http.routers.webstudio-https.rule=Host(`builderstaging.recomiend.app`) || HostRegexp(`^.+\.builderstaging\.recomiend\.app$`)
+      - traefik.http.routers.webstudio-https.rule=Host(`builderstaging.recomiend.app`) || HostRegexp(`{subdomain:[a-z0-9-]+}.builderstaging.recomiend.app`)
       - traefik.http.routers.webstudio-https.entryPoints=https
       - traefik.http.routers.webstudio-https.middlewares=gzip
       - traefik.http.routers.webstudio-https.service=webstudio-svc
-      - traefik.http.routers.webstudio-https.tls.certresolver=letsencrypt
-      - traefik.http.routers.traefik.tls.domains[0].main=builderstaging.recomiend.app
-      - traefik.http.routers.traefik.tls.domains[0].sans=*.builderstaging.recomiend.app
-      - traefik.http.services.webstudio-svc.loadbalancer.server.port=3000
       - traefik.http.routers.webstudio-https.tls=true
-      - traefik.http.routers.webstudio-https.priority=100
-      
-      # Redirección HTTP a HTTPS
-      - traefik.http.routers.webstudio-http.rule=Host(`builderstaging.recomiend.app`) || HostRegexp(`^.+\.builderstaging\.recomiend\.app$`)
+      - traefik.http.routers.webstudio-https.tls.certresolver=letsencrypt-dns
+      - traefik.http.routers.webstudio-https.tls.domains[0].main=builderstaging.recomiend.app
+      - traefik.http.routers.webstudio-https.tls.domains[0].sans=*.builderstaging.recomiend.app
+      - traefik.http.services.webstudio-svc.loadbalancer.server.port=3000
+
+      - traefik.http.routers.webstudio-http.rule=Host(`builderstaging.recomiend.app`) || HostRegexp(`{subdomain:[a-z0-9-]+}.builderstaging.recomiend.app`)
       - traefik.http.routers.webstudio-http.entryPoints=http
       - traefik.http.routers.webstudio-http.middlewares=redirect-to-https
 
-      # Middlewares
-      - traefik.http.middlewares.webstudio-proto.headers.customrequestheaders.X-Forwarded-Proto=https
       - traefik.http.middlewares.gzip.compress=true
 volumes:
   webstudio_assets:
