@@ -429,7 +429,10 @@ const Publish = ({
       }
   >;
 }) => {
-  const { maxDailyPublishesPerUser } = useStore($permissions);
+  const { maxDailyPublishesPerUser, maxWorkspaces } = useStore($permissions);
+  // Legacy publish flow still branches by "pro-like" behavior.
+  // In current plans, workspace support (>1) is the equivalent gate.
+  const hasProPlan = maxWorkspaces > 1;
   const { userPublishCount } = useUserPublishCount();
   const [publishError, setPublishError] = useState<
     undefined | JSX.Element | string
