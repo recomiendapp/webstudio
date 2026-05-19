@@ -514,16 +514,24 @@ const Publish = ({
       return;
     }
     const projectId = project.id;
+    const toPublishLink = (link: Partial<LinkOptions>): LinkOptions => ({
+      token: link.token ?? authToken ?? "",
+      name: link.name ?? "Shared link",
+      relation: (link.relation ?? "viewers") as LinkOptions["relation"],
+      canClone: link.canClone ?? true,
+      canCopy: link.canCopy ?? true,
+      canPublish: link.canPublish ?? true,
+    });
     // If project was opened via shared authToken, reuse it and skip token APIs
     if (authToken) {
-      const selectedLink: LinkOptions = {
+      const selectedLink: LinkOptions = toPublishLink({
         token: authToken,
         name: "Shared link",
         relation: "viewers",
         canClone: false,
         canCopy: false,
         canPublish: true,
-      };
+      });
 
       const publishResult = await nativeClient.domain.publish.mutate({
         projectId: project.id,
@@ -648,7 +656,7 @@ const Publish = ({
       destination: "saas",
       links: [
           {
-            ...selectedLink,
+            ...toPublishLink(selectedLink ?? {}),
             projectId,
             createdAt: new Date().toISOString(),
           },
