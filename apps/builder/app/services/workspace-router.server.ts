@@ -123,10 +123,16 @@ export const workspaceRouter = router({
         }
 
         const isDevEnvironment = env.DEPLOYMENT_ENVIRONMENT === "development";
+        const allowInvitesWithoutPayment =
+          process.env.WORKSPACE_INVITES_WITHOUT_PAYMENT === "true";
         const hasPaymentWorker =
           env.PAYMENT_WORKER_URL && env.PAYMENT_WORKER_TOKEN;
 
-        if (!hasPaymentWorker && !isDevEnvironment) {
+        if (
+          !hasPaymentWorker &&
+          !isDevEnvironment &&
+          !allowInvitesWithoutPayment
+        ) {
           throw new Error(
             "Adding workspace members requires a configured payment provider."
           );
