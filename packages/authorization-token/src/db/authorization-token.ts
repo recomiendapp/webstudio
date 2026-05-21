@@ -53,9 +53,10 @@ export const findMany = async (
   props: { projectId: string },
   context: AppContext
 ) => {
-  // Only owner of the project can list authorization tokens
+  // Allow project collaborators with build-level access (including
+  // workspace administrators) to publish without requiring ownership.
   const canList = await authorizeProject.hasProjectPermit(
-    { projectId: props.projectId, permit: "own" },
+    { projectId: props.projectId, permit: "build" },
     context
   );
 
@@ -131,9 +132,9 @@ export const create = async (
 ) => {
   const tokenId = crypto.randomUUID();
 
-  // Only owner of the project can create authorization tokens
+  // Allow collaborators with build-level access to create publish links.
   const canCreateToken = await authorizeProject.hasProjectPermit(
-    { projectId: props.projectId, permit: "own" },
+    { projectId: props.projectId, permit: "build" },
     context
   );
 
@@ -165,9 +166,9 @@ export const update = async (
     Partial<AuthorizationToken>,
   context: AppContext
 ) => {
-  // Only owner of the project can edit authorization tokens
+  // Allow collaborators with build-level access to edit publish links.
   const canCreateToken = await authorizeProject.hasProjectPermit(
-    { projectId, permit: "own" },
+    { projectId, permit: "build" },
     context
   );
 
@@ -217,9 +218,9 @@ export const remove = async (
   },
   context: AppContext
 ) => {
-  // Only owner of the project can delete authorization tokens
+  // Allow collaborators with build-level access to delete publish links.
   const canDeleteToken = await authorizeProject.hasProjectPermit(
-    { projectId: props.projectId, permit: "own" },
+    { projectId: props.projectId, permit: "build" },
     context
   );
 
