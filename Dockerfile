@@ -1,16 +1,8 @@
 # --- Étape 1 : build ---
-FROM node:20-alpine AS build 
-RUN npm install -g pnpm 
+FROM node:22-alpine AS build 
 WORKDIR /app
 
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./ 
-COPY vite.*.ts ./ 
-COPY patches ./patches 
-COPY apps ./apps 
-COPY packages ./packages
-
-RUN pnpm install --frozen-lockfile
-
+# System deps needed for native modules (prisma, etc.) during install/build
 RUN apk add --no-cache \
     bash \
     libc6-compat \
@@ -21,6 +13,17 @@ RUN apk add --no-cache \
     make \
     g++ \
     python3
+
+# Pin pnpm to the version declared in package.json (packageManager field)
+RUN corepack enable && corepack prepare pnpm@9.14.4 --activate
+
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./ 
+COPY vite.*.ts ./ 
+COPY patches ./patches 
+COPY apps ./apps 
+COPY packages ./packages
+
+RUN pnpm install --frozen-lockfile
 
 RUN mkdir -p /app/https && \
     openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
@@ -32,10 +35,8 @@ ENV HTTPS_DISABLE=true
 RUN pnpm -r --filter "@webstudio-is/builder..." run build
 
 # --- Étape 2 : runtime ---
-FROM node:20-alpine 
-RUN npm install -g pnpm 
+FROM node:22-alpine 
 WORKDIR /app 
-COPY --from=build /app ./ 
 RUN apk add --no-cache \
     bash \
     libc6-compat \
@@ -46,6 +47,8 @@ RUN apk add --no-cache \
     make \
     g++ \
     python3
+RUN corepack enable && corepack prepare pnpm@9.14.4 --activate
+COPY --from=build /app ./ 
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 ENV TRUST_PROXY=true
