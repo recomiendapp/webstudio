@@ -1,94 +1,2366 @@
-import { expect, test } from "vitest";
-import { parseBuilderUrl } from "./index";
+import { readFile } from "node:fs/promises";
+import { createServer, type IncomingMessage } from "node:http";
+import { afterEach, expect, test, vi } from "vitest";
+import {
+  bundleVersion,
+  publicApiOperations,
+  stagedUploadPath,
+} from "@webstudio-is/protocol";
+import {
+  createImageAssetFixture,
+  createPublishedProjectBundleFixture,
+} from "@webstudio-is/protocol/fixtures";
+import {
+  applyBuildPatch,
+  applyRestorePointPatch,
+  attachDesignToken,
+  bindProps,
+  cloneInstance,
+  createAssetFolder,
+  createProjectAssetFolder,
+  createBreakpoint,
+  createPageFromTemplate,
+  createDesignTokens,
+  createDomain,
+  createRedirect,
+  defineCssVariables,
+  createFolder,
+  createPage,
+  createApiClientHeaders,
+  createResource,
+  createVariable,
+  deleteDesignTokenStyles,
+  deleteCssVariables,
+  deleteAssetFolder,
+  deleteAssets,
+  deleteProjectAsset,
+  deleteProjectAssetFolder,
+  deleteBreakpoint,
+  deleteDomain,
+  deletePage,
+  deleteFolder,
+  detachDesignToken,
+  deleteInstance,
+  deleteProps,
+  deleteResource,
+  deleteRedirect,
+  deleteVariable,
+  duplicatePage,
+  duplicateAsset,
+  duplicateAssetFolder,
+  extractDesignToken,
+  findAssetUsage,
+  getPublishJob,
+  getApiCompatibilityMessage,
+  getApiErrorCode,
+  getBuildSnapshot,
+  getPage,
+  getPageByPath,
+  getBuildPatchSummary,
+  getMarketplaceProduct,
+  getProjectPermissions,
+  getProjectAsset,
+  getProjectAssetFolder,
+  getProjectSettings,
+  getStyleDeclarations,
+  inspectInstance,
+  insertCollection,
+  insertComponent,
+  insertFragment,
+  importProjectBundle,
+  importProjectBundleWithAssets,
+  listAssets,
+  listProjectAssets,
+  listProjectAssetFolders,
+  listAssetFolders,
+  listBreakpoints,
+  listDesignTokens,
+  listDomains,
+  listFolders,
+  listCssVariables,
+  listInstances,
+  listPages,
+  listPageTemplates,
+  listPublishes,
+  listRedirects,
+  listResources,
+  listTexts,
+  listVariables,
+  loadProjectBundleByBuildId,
+  loadProjectBundleByProjectId,
+  moveInstance,
+  publish,
+  readProjectAssetContent,
+  parseBuildPatchTransactions,
+  parseBuilderUrl,
+  toLocalProjectBundle,
+  uploadAsset,
+  uploadAssets,
+  uploadProjectAsset,
+  uploadProjectAssets,
+  deleteStyleDeclarations,
+  replaceAsset,
+  replaceStyleValues,
+  rewriteCssVariableRefs,
+  updateDesignTokenStyles,
+  updateAssetFolder,
+  updateProjectAsset,
+  updateProjectAssetFolder,
+  updateProjectAssetContent,
+  updateDomain,
+  updateBreakpoint,
+  updatePage,
+  updateFolder,
+  updateProps,
+  updateProjectSettings,
+  updateRedirect,
+  updateResource,
+  updateStyleDeclarations,
+  updateText,
+  updateVariable,
+  unpublish,
+  verifyDomain,
+  type PublishedProjectBundle,
+} from "./index";
+import * as httpClient from "./index";
 
-test("parseBuilderUrl wstd.dev", async () => {
-  expect(
-    parseBuilderUrl("https://p-090e6e14-ae50-4b2e-bd22-71733cec05bb.wstd.dev")
-  ).toMatchInlineSnapshot(`
-    {
-      "projectId": "090e6e14-ae50-4b2e-bd22-71733cec05bb",
-      "sourceOrigin": "https://wstd.dev",
-    }
-  `);
+type FragmentPayload = Parameters<typeof insertFragment>[0]["fragment"];
+
+const createFragmentPayload = (): FragmentPayload => ({
+  children: [],
+  instances: [],
+  assets: [],
+  dataSources: [],
+  resources: [],
+  props: [],
+  breakpoints: [],
+  styleSourceSelections: [],
+  styleSources: [],
+  styles: [],
 });
 
-test("parseBuilderUrl localhost", async () => {
-  expect(
-    parseBuilderUrl("https://p-090e6e14-ae50-4b2e-bd22-71733cec05bb.localhost")
-  ).toMatchInlineSnapshot(`
-    {
-      "projectId": "090e6e14-ae50-4b2e-bd22-71733cec05bb",
-      "sourceOrigin": "https://localhost",
-    }
-  `);
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
-test("parseBuilderUrl localhost", async () => {
-  expect(parseBuilderUrl("https://p-eee.localhost")).toMatchInlineSnapshot(`
-    {
-      "projectId": undefined,
-      "sourceOrigin": "https://p-eee.localhost",
-    }
-  `);
+const expectRequest = (
+  path: string,
+  body: string | ReturnType<typeof expect.stringContaining> = ""
+) => ({
+  path,
+  search: expect.any(String),
+  token: "token",
+  body,
 });
 
-test("parseBuilderUrl development.webstudio.is", async () => {
-  expect(
-    parseBuilderUrl(
-      "https://p-090e6e14-ae50-4b2e-bd22-71733cec05bb.development.webstudio.is"
-    )
-  ).toMatchInlineSnapshot(`
-    {
-      "projectId": "090e6e14-ae50-4b2e-bd22-71733cec05bb",
-      "sourceOrigin": "https://development.webstudio.is",
-    }
-  `);
-});
+const expectBodyRequest = (path: string, body: string) =>
+  expectRequest(path, expect.stringContaining(body));
 
-test("parseBuilderUrl main.development.webstudio.is", async () => {
-  expect(
-    parseBuilderUrl(
-      "https://p-090e6e14-ae50-4b2e-bd22-71733cec05bb-dot-main.development.webstudio.is"
-    )
-  ).toMatchInlineSnapshot(`
-    {
-      "projectId": "090e6e14-ae50-4b2e-bd22-71733cec05bb",
-      "sourceOrigin": "https://main.development.webstudio.is",
-    }
-  `);
-});
+const apiParams = {
+  authToken: "token",
+  origin: "https://apps.webstudio.is",
+  projectId: "project-id",
+};
 
-test("parseBuilderUrl branch.development.webstudio.is", async () => {
-  expect(
-    parseBuilderUrl(
-      "https://p-090e6e14-ae50-4b2e-bd22-71733cec05bb-dot-branch.development.webstudio.is"
-    )
-  ).toMatchInlineSnapshot(`
-{
-  "projectId": "090e6e14-ae50-4b2e-bd22-71733cec05bb",
-  "sourceOrigin": "https://branch.development.webstudio.is",
-}
-`);
-});
-
-test("parseBuilderUrl apps.webstudio.is", async () => {
+test("re-exports builder URL parsing from protocol", () => {
   expect(
     parseBuilderUrl(
       "https://p-090e6e14-ae50-4b2e-bd22-71733cec05bb.apps.webstudio.is"
     )
+  ).toEqual({
+    projectId: "090e6e14-ae50-4b2e-bd22-71733cec05bb",
+    sourceOrigin: "https://apps.webstudio.is",
+  });
+});
+
+test("reports non-json api responses", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response("<html>\n<h1>Request Entity Too Large</h1>", {
+        status: 413,
+        statusText: "Payload Too Large",
+        headers: {
+          "content-type": "text/html",
+        },
+      })
+    )
+  );
+
+  let message;
+  let status;
+  try {
+    await loadProjectBundleByProjectId({
+      authToken: "token",
+      origin:
+        "https://p-090e6e14-ae50-4b2e-bd22-71733cec05bb.apps.webstudio.is",
+      projectId: "090e6e14-ae50-4b2e-bd22-71733cec05bb",
+    });
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+    status =
+      typeof error === "object" && error !== null && "status" in error
+        ? error.status
+        : typeof error === "object" &&
+            error !== null &&
+            "cause" in error &&
+            typeof error.cause === "object" &&
+            error.cause !== null &&
+            "status" in error.cause
+          ? error.cause.status
+          : undefined;
+  }
+
+  expect(status).toBe(413);
+  expect(message).toContain(
+    "API returned text/html instead of JSON from https://apps.webstudio.is/trpc"
+  );
+  expect(message).toContain("HTTP status: 413 Payload Too Large.");
+  expect(message).toContain(
+    "Response preview: <html> <h1>Request Entity Too Large</h1>"
+  );
+  expect(message).toContain("The request may be too large for the API.");
+});
+
+test("sends the bundle contract when loading by project id", async () => {
+  const project = createPublishedProjectBundleFixture();
+  const fetch = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify([{ result: { data: project } }]), {
+      headers: { "content-type": "application/json" },
+    })
+  );
+  vi.stubGlobal("fetch", fetch);
+
+  await loadProjectBundleByProjectId(apiParams);
+
+  const [url] = fetch.mock.calls[0] as [RequestInfo | URL, RequestInit];
+  expect(decodeURIComponent(String(url))).toContain(
+    `"bundleVersion":"${bundleVersion}"`
+  );
+});
+
+test("creates api client compatibility headers", () => {
+  expect(createApiClientHeaders({ name: "cli", version: "1.2.3" })).toEqual({
+    "x-webstudio-client": "cli",
+    "x-webstudio-client-version": "1.2.3",
+  });
+});
+
+test("formats api compatibility update messages", () => {
+  const error = {
+    cause: {
+      type: "webstudioApiCompatibilityError",
+      reason: "apiProcedureNotFound",
+      target: "cli",
+      message:
+        "This version of the Webstudio CLI is incompatible with the current API.",
+      action: { type: "updateCli" },
+    },
+  };
+
+  expect(
+    getApiCompatibilityMessage(error, {
+      updateCommand: "npm install -g webstudio@latest",
+      runLatestCommand: "npx webstudio@latest sync",
+    })
   ).toMatchInlineSnapshot(`
-    {
-      "projectId": "090e6e14-ae50-4b2e-bd22-71733cec05bb",
-      "sourceOrigin": "https://apps.webstudio.is",
-    }
+    "This version of the Webstudio CLI is incompatible with the current API.
+
+    Update the CLI with:
+      npm install -g webstudio@latest
+
+    Or run the latest version once with:
+      npx webstudio@latest sync"
   `);
 });
 
-test("parseBuilderUrl apps.webstudio.is", async () => {
-  expect(parseBuilderUrl("https://apps.webstudio.is")).toMatchInlineSnapshot(`
-    {
-      "projectId": undefined,
-      "sourceOrigin": "https://apps.webstudio.is",
+test("extracts api error codes", () => {
+  expect(getApiErrorCode({ data: { code: "CONFLICT" } })).toBe("CONFLICT");
+  expect(
+    getApiErrorCode({
+      data: { code: "NOT_FOUND", webstudioCode: "PROJECT_NOT_PUBLISHED" },
+    })
+  ).toBe("PROJECT_NOT_PUBLISHED");
+  expect(
+    getApiErrorCode({
+      data: { code: "BAD_REQUEST", webstudioCode: "INVALID_INPUT" },
+    })
+  ).toBe("INVALID_INPUT");
+  expect(
+    getApiErrorCode({ data: { code: "SOME_PRIVATE_CODE" } })
+  ).toBeUndefined();
+  expect(getApiErrorCode(new Error("No code"))).toBeUndefined();
+});
+
+test("defines unique public api operation descriptors", () => {
+  const commands = publicApiOperations.map(({ command }) => command);
+  const ids = publicApiOperations.map(({ id }) => id);
+  expect(new Set(commands).size).toBe(commands.length);
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(publicApiOperations).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        command: "create-page",
+        id: "pages.create",
+        method: "mutation",
+        permit: "build",
+        path: "api.pages.create",
+        client: "createPage",
+      }),
+      expect.objectContaining({
+        command: "list-pages",
+        id: "pages.list",
+        method: "query",
+        permit: "view",
+        path: "api.pages.list",
+        client: "listPages",
+      }),
+      expect.objectContaining({
+        command: "list-instances",
+        id: "instances.list",
+        method: "query",
+        permit: "view",
+        path: "api.instances.list",
+        client: "listInstances",
+      }),
+      expect.objectContaining({
+        command: "list-texts",
+        id: "instances.listTexts",
+        method: "query",
+        permit: "view",
+        path: "api.instances.listTexts",
+        client: "listTexts",
+      }),
+      expect.objectContaining({
+        command: "create-domain",
+        permit: "admin",
+      }),
+    ])
+  );
+});
+
+test("operation descriptors reference exported http-client functions", () => {
+  for (const operation of publicApiOperations) {
+    expect(httpClient).toHaveProperty(operation.client);
+    expect(typeof httpClient[operation.client as keyof typeof httpClient]).toBe(
+      "function"
+    );
+  }
+});
+
+test("keeps public api paths in the operation descriptor", async () => {
+  const content = await readFile(new URL("index.ts", import.meta.url), "utf-8");
+  expect(content).not.toMatch(/["']api\.[A-Za-z0-9_.]+["']/);
+});
+
+test("wraps project api trpc calls in named functions", async () => {
+  const requests: Array<{
+    path: string;
+    search: string;
+    body: string;
+    token?: string;
+  }> = [];
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url ?? "/", "http://localhost");
+    requests.push({
+      path: url.pathname,
+      search: url.search,
+      body: (await readRequestBody(request)).toString("utf8"),
+      token: request.headers["x-auth-token"] as string | undefined,
+    });
+    const data =
+      url.pathname === "/trpc/api.build.get"
+        ? {
+            version: 2,
+            homePageId: "home-id",
+            rootFolderId: "root-folder",
+            pages: [
+              {
+                id: "home-id",
+                name: "Home",
+                path: "",
+                title: "Home",
+                rootInstanceId: "home-body-id",
+                meta: {},
+              },
+              {
+                id: "page-id",
+                name: "Pricing",
+                path: "/pricing",
+                title: "Pricing",
+                rootInstanceId: "body-id",
+                meta: {},
+              },
+              {
+                id: "post-id",
+                name: "Post",
+                path: "/first-post",
+                title: "Post",
+                rootInstanceId: "post-body-id",
+                meta: {},
+              },
+            ],
+            folders: [
+              {
+                id: "root-folder",
+                children: ["home-id", "page-id", "folder-id"],
+              },
+              {
+                id: "folder-id",
+                name: "Blog",
+                slug: "blog",
+                children: ["post-id"],
+              },
+            ],
+            styleSources: [{ id: "token-id", type: "token", name: "Primary" }],
+            styles: [
+              {
+                styleSourceId: "token-id",
+                property: "color",
+                value: { type: "keyword", value: "red" },
+              },
+            ],
+            styleSourceSelections: [{ values: ["token-id"] }],
+            instances: [
+              {
+                id: "body-id",
+                component: "Body",
+                children: [{ type: "text", value: "headline" }],
+              },
+            ],
+            resources: [],
+            variables: [
+              {
+                id: "variable-id",
+                scopeInstanceId: "body-id",
+                name: "Old Title",
+                type: "variable",
+                value: { type: "string", value: "Hello" },
+              },
+            ],
+          }
+        : { ok: true };
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify([{ result: { data } }]));
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  try {
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("Server address is unavailable");
     }
-  `);
+    const params = {
+      authToken: "token",
+      origin: `http://127.0.0.1:${address.port}`,
+      projectId: "project-id",
+    };
+
+    await getBuildSnapshot({
+      ...params,
+      include: ["pages"],
+      version: 2,
+    });
+    await listPages({
+      ...params,
+      limit: 20,
+      verbose: true,
+    });
+    await getPage({
+      ...params,
+      pageId: "page-id",
+    });
+    await getPageByPath({
+      ...params,
+      path: "/pricing",
+    });
+    await getPageByPath({
+      ...params,
+      path: "/",
+    });
+    await getPageByPath({
+      ...params,
+      path: "/blog/first-post",
+    });
+    await createPage({
+      ...params,
+      name: "Pricing",
+      path: "/pricing",
+    });
+    await updatePage({
+      ...params,
+      pageId: "page-id",
+      values: { title: "Pricing" },
+    });
+    await getProjectSettings(params);
+    await getMarketplaceProduct(params);
+    await updateProjectSettings({
+      ...params,
+      meta: { siteName: "Acme", faviconAssetId: null },
+      compiler: { atomicStyles: true },
+    });
+    await listRedirects(params);
+    await createRedirect({
+      ...params,
+      old: "/old",
+      new: "/new",
+      status: "301",
+    });
+    await updateRedirect({
+      ...params,
+      old: "/old",
+      values: { old: "/older", new: "/newer", status: null },
+    });
+    await deleteRedirect({
+      ...params,
+      old: "/older",
+    });
+    await listBreakpoints(params);
+    await createBreakpoint({
+      ...params,
+      label: "Tablet",
+      maxWidth: 991,
+    });
+    await updateBreakpoint({
+      ...params,
+      breakpointId: "tablet",
+      values: { maxWidth: 1023, condition: null },
+    });
+    await deleteBreakpoint({
+      ...params,
+      breakpointId: "tablet",
+    });
+    await duplicatePage({
+      ...params,
+      pageId: "page-id",
+      name: "Pricing Copy",
+    });
+    await listPageTemplates(params);
+    await createPageFromTemplate({
+      ...params,
+      templateId: "template-id",
+      name: "Landing",
+      path: "/landing",
+    });
+    await deletePage({
+      ...params,
+      pageId: "page-id",
+    });
+    await createFolder({
+      ...params,
+      name: "Blog",
+      slug: "blog",
+    });
+    await updateFolder({
+      ...params,
+      folderId: "folder-id",
+      values: { name: "Blog" },
+    });
+    await deleteFolder({
+      ...params,
+      folderId: "folder-id",
+    });
+    await listInstances({
+      ...params,
+      pagePath: "/pricing",
+      maxDepth: 2,
+    });
+    await inspectInstance({
+      ...params,
+      instanceId: "instance-id",
+      include: ["props", "styles", "children"],
+      childDepth: 1,
+    });
+    await listTexts({
+      ...params,
+      pagePath: "/pricing",
+      contains: "headline",
+    });
+    await updateText({
+      ...params,
+      instanceId: "instance-id",
+      childIndex: 0,
+      text: "Hello",
+    });
+    await createVariable({
+      ...params,
+      scopeInstanceId: "body-id",
+      name: "Title",
+      value: { type: "string", value: "Hello" },
+    });
+    await updateVariable({
+      ...params,
+      dataSourceId: "variable-id",
+      values: { name: "Title" },
+    });
+    await deleteVariable({
+      ...params,
+      dataSourceId: "variable-id",
+    });
+    await createResource({
+      ...params,
+      resource: {
+        name: "Posts",
+        method: "get",
+        url: '"https://api.example.com/posts"',
+        headers: [],
+      },
+    });
+    await updateResource({
+      ...params,
+      resourceId: "resource-id",
+      values: { name: "Posts" },
+    });
+    await deleteResource({
+      ...params,
+      resourceId: "resource-id",
+      force: true,
+    });
+    await insertComponent({
+      ...params,
+      parentInstanceId: "parent-id",
+      component: "@webstudio-is/sdk-components-react-radix:Switch",
+    });
+    await insertCollection({
+      ...params,
+      parentInstanceId: "parent-id",
+      data: { type: "json", value: [{ title: "First" }] },
+      itemFragment: {
+        ...createFragmentPayload(),
+        children: [{ type: "id", value: "item-root" }],
+        instances: [
+          {
+            type: "instance",
+            id: "item-root",
+            component: "ws:element",
+            tag: "article",
+            children: [],
+          },
+        ],
+      },
+    });
+    await insertFragment({
+      ...params,
+      parentInstanceId: "parent-id",
+      fragment: createFragmentPayload(),
+    });
+    await moveInstance({
+      ...params,
+      moves: [{ instanceId: "instance-id", parentInstanceId: "parent-id" }],
+    });
+    await cloneInstance({
+      ...params,
+      sourceInstanceId: "instance-id",
+      targetParentInstanceId: "parent-id",
+    });
+    await deleteInstance({
+      ...params,
+      instanceIds: ["instance-id"],
+    });
+    await updateProps({
+      ...params,
+      updates: [
+        {
+          instanceId: "instance-id",
+          name: "title",
+          type: "string",
+          value: "Hi",
+        },
+      ],
+    });
+    await deleteProps({
+      ...params,
+      deletions: [{ instanceId: "instance-id", name: "title" }],
+    });
+    await bindProps({
+      ...params,
+      bindings: [
+        {
+          instanceId: "instance-id",
+          name: "title",
+          binding: { type: "expression", value: "title" },
+        },
+      ],
+    });
+    await getStyleDeclarations({
+      ...params,
+      instanceIds: ["instance-id"],
+      includeTokens: true,
+    });
+    await updateStyleDeclarations({
+      ...params,
+      updates: [
+        {
+          instanceId: "instance-id",
+          property: "color",
+          value: { type: "keyword", value: "red" },
+        },
+      ],
+    });
+    await deleteStyleDeclarations({
+      ...params,
+      deletions: [{ instanceId: "instance-id", property: "color" }],
+    });
+    await replaceStyleValues({
+      ...params,
+      property: "color",
+      fromValue: { type: "keyword", value: "red" },
+      toValue: { type: "keyword", value: "blue" },
+    });
+    await listDesignTokens({
+      ...params,
+      withUsage: true,
+      sort: "usage",
+    });
+    await createDesignTokens({
+      ...params,
+      tokens: [
+        {
+          name: "Primary",
+          styles: { color: { type: "keyword", value: "red" } },
+        },
+      ],
+    });
+    await updateDesignTokenStyles({
+      ...params,
+      designTokenId: "token-id",
+      updates: [
+        { property: "color", value: { type: "keyword", value: "blue" } },
+      ],
+    });
+    await deleteDesignTokenStyles({
+      ...params,
+      designTokenId: "token-id",
+      deletions: [{ property: "color" }],
+    });
+    await attachDesignToken({
+      ...params,
+      designTokenId: "token-id",
+      instanceIds: ["instance-id"],
+      position: "before-local",
+    });
+    await detachDesignToken({
+      ...params,
+      designTokenId: "token-id",
+      instanceIds: ["instance-id"],
+    });
+    await extractDesignToken({
+      ...params,
+      instanceIds: ["instance-id"],
+      name: "Extracted",
+      removeLocalProps: ["color"],
+    });
+    await listCssVariables({
+      ...params,
+      withUsage: true,
+    });
+    await defineCssVariables({
+      ...params,
+      vars: { "--brand-color": "red" },
+      overwrite: true,
+    });
+    await deleteCssVariables({
+      ...params,
+      names: ["--brand-color"],
+      force: true,
+    });
+    await rewriteCssVariableRefs({
+      ...params,
+      map: { "--brand-color": "--accent-color" },
+      scopeRegex: "body",
+    });
+    await listVariables({
+      ...params,
+      scopeInstanceId: "body-id",
+    });
+    await listResources({
+      ...params,
+      scopeInstanceId: "body-id",
+    });
+    await listPublishes(params);
+    await publish({
+      ...params,
+      target: "production",
+      domains: ["example.com"],
+      message: "Ship",
+      idempotencyKey: "publish-key",
+    });
+    await getPublishJob({
+      ...params,
+      jobId: "job-id",
+    });
+    await unpublish({
+      ...params,
+      target: "production",
+      domains: ["example.com"],
+      message: "Rollback",
+      idempotencyKey: "unpublish-key",
+    });
+    await listDomains(params);
+    await createDomain({
+      ...params,
+      domain: "example.com",
+    });
+    await updateDomain({
+      ...params,
+      domainId: "domain-id",
+      updates: { domain: "www.example.com" },
+    });
+    await deleteDomain({
+      ...params,
+      domainId: "domain-id",
+    });
+    await verifyDomain({
+      ...params,
+      domainId: "domain-id",
+    });
+    await listAssetFolders(params);
+    await createAssetFolder({
+      ...params,
+      name: "Images",
+    });
+    await updateAssetFolder({
+      ...params,
+      folderId: "folder-id",
+      values: { name: "Photos", parentId: null },
+    });
+    await deleteAssetFolder({
+      ...params,
+      folderId: "folder-id",
+    });
+    await duplicateAssetFolder({
+      ...params,
+      folderId: "folder-id",
+      parentId: null,
+    });
+    await listAssets({
+      ...params,
+      type: "image",
+      withUsage: true,
+    });
+    await findAssetUsage({
+      ...params,
+      assetId: "asset-id",
+    });
+    await replaceAsset({
+      ...params,
+      fromAssetId: "old-asset-id",
+      toAssetId: "new-asset-id",
+    });
+    await deleteAssets({
+      ...params,
+      assetIdsOrPrefixes: ["asset-id"],
+      force: true,
+    });
+    await duplicateAsset({
+      ...params,
+      assetId: "asset-id",
+      folderId: null,
+    });
+    await getProjectPermissions(params);
+    await listFolders({
+      ...params,
+      cursor: "20",
+      limit: 20,
+    });
+    await applyBuildPatch({
+      ...params,
+      baseVersion: 2,
+      transactions: {
+        transactions: [
+          {
+            id: "tx-1",
+            payload: [
+              {
+                namespace: "pages",
+                patches: [
+                  {
+                    op: "replace",
+                    path: ["meta", "siteName"],
+                    value: "Site",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    await applyRestorePointPatch({
+      ...params,
+      baseVersion: 3,
+      transactions: [
+        {
+          id: "restore-1",
+          payload: [
+            {
+              namespace: "pages",
+              patches: [{ op: "replace", path: [], value: {} }],
+            },
+          ],
+        },
+      ],
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+
+  expect(requests).toEqual([
+    expectRequest("/trpc/api.build.get"),
+    expectRequest("/trpc/api.pages.list"),
+    expectRequest("/trpc/api.pages.get"),
+    expectRequest("/trpc/api.pages.getByPath"),
+    expectRequest("/trpc/api.pages.getByPath"),
+    expectRequest("/trpc/api.pages.getByPath"),
+    expectBodyRequest("/trpc/api.pages.create", '"name":"Pricing"'),
+    expectBodyRequest("/trpc/api.pages.update", '"title":"Pricing"'),
+    expectRequest("/trpc/api.projectSettings.get"),
+    expectRequest("/trpc/api.projectSettings.getMarketplaceProduct"),
+    expectBodyRequest("/trpc/api.projectSettings.update", '"siteName":"Acme"'),
+    expectRequest("/trpc/api.redirects.list"),
+    expectBodyRequest("/trpc/api.redirects.create", '"old":"/old"'),
+    expectBodyRequest("/trpc/api.redirects.update", '"old":"/older"'),
+    expectBodyRequest("/trpc/api.redirects.delete", '"old":"/older"'),
+    expectRequest("/trpc/api.breakpoints.list"),
+    expectBodyRequest("/trpc/api.breakpoints.create", '"maxWidth":991'),
+    expectBodyRequest("/trpc/api.breakpoints.update", '"condition":null'),
+    expectBodyRequest(
+      "/trpc/api.breakpoints.delete",
+      '"breakpointId":"tablet"'
+    ),
+    expectBodyRequest("/trpc/api.pages.duplicate", '"name":"Pricing Copy"'),
+    expectRequest("/trpc/api.pageTemplates.list"),
+    expectBodyRequest(
+      "/trpc/api.pageTemplates.createPage",
+      '"templateId":"template-id"'
+    ),
+    expectBodyRequest("/trpc/api.pages.delete", '"pageId":"page-id"'),
+    expectBodyRequest("/trpc/api.folders.create", '"slug":"blog"'),
+    expectBodyRequest("/trpc/api.folders.update", '"folderId":"folder-id"'),
+    expectBodyRequest("/trpc/api.folders.delete", '"folderId":"folder-id"'),
+    expectRequest("/trpc/api.instances.list"),
+    expectRequest("/trpc/api.instances.inspect"),
+    expectRequest("/trpc/api.instances.listTexts"),
+    expectBodyRequest("/trpc/api.instances.updateText", '"text":"Hello"'),
+    expectBodyRequest(
+      "/trpc/api.variables.create",
+      '"scopeInstanceId":"body-id"'
+    ),
+    expectBodyRequest("/trpc/api.variables.update", '"variable-id"'),
+    expectBodyRequest("/trpc/api.variables.delete", '"variable-id"'),
+    expectBodyRequest("/trpc/api.resources.create", '"name":"Posts"'),
+    expectBodyRequest(
+      "/trpc/api.resources.update",
+      '"resourceId":"resource-id"'
+    ),
+    expectBodyRequest("/trpc/api.resources.delete", '"force":true'),
+    expectBodyRequest(
+      "/trpc/api.instances.insertComponent",
+      '"component":"@webstudio-is/sdk-components-react-radix:Switch"'
+    ),
+    expectBodyRequest(
+      "/trpc/api.instances.insertCollection",
+      '"itemFragment":{"children":[{"type":"id","value":"item-root"}]'
+    ),
+    expectBodyRequest(
+      "/trpc/api.instances.insertFragment",
+      '"fragment":{"children":[]'
+    ),
+    expectBodyRequest("/trpc/api.instances.move", '"instanceId":"instance-id"'),
+    expectBodyRequest(
+      "/trpc/api.instances.clone",
+      '"sourceInstanceId":"instance-id"'
+    ),
+    expectBodyRequest(
+      "/trpc/api.instances.delete",
+      '"instanceIds":["instance-id"]'
+    ),
+    expectBodyRequest("/trpc/api.instances.updateProps", '"name":"title"'),
+    expectBodyRequest("/trpc/api.instances.deleteProps", '"deletions"'),
+    expectBodyRequest("/trpc/api.instances.bindProps", '"binding"'),
+    expectRequest("/trpc/api.styles.getDeclarations"),
+    expectBodyRequest(
+      "/trpc/api.styles.updateDeclarations",
+      '"property":"color"'
+    ),
+    expectBodyRequest("/trpc/api.styles.deleteDeclarations", '"deletions"'),
+    expectBodyRequest("/trpc/api.styles.replaceValues", '"fromValue"'),
+    expectRequest("/trpc/api.designTokens.list"),
+    expectBodyRequest("/trpc/api.designTokens.create", '"name":"Primary"'),
+    expectBodyRequest(
+      "/trpc/api.designTokens.updateStyles",
+      '"designTokenId":"token-id"'
+    ),
+    expectBodyRequest("/trpc/api.designTokens.deleteStyles", '"deletions"'),
+    expectBodyRequest(
+      "/trpc/api.designTokens.attach",
+      '"position":"before-local"'
+    ),
+    expectBodyRequest(
+      "/trpc/api.designTokens.detach",
+      '"instanceIds":["instance-id"]'
+    ),
+    expectBodyRequest("/trpc/api.designTokens.extract", '"name":"Extracted"'),
+    expectRequest("/trpc/api.cssVariables.list"),
+    expectBodyRequest("/trpc/api.cssVariables.define", '"--brand-color":"red"'),
+    expectBodyRequest("/trpc/api.cssVariables.delete", '"confirm":true'),
+    expectBodyRequest(
+      "/trpc/api.cssVariables.rewriteRefs",
+      '"scopeRegex":"body"'
+    ),
+    expectRequest("/trpc/api.variables.list"),
+    expectRequest("/trpc/api.resources.list"),
+    expectRequest("/trpc/api.publish.list"),
+    expectBodyRequest(
+      "/trpc/api.publish.create",
+      '"idempotencyKey":"publish-key"'
+    ),
+    expectRequest("/trpc/api.publish.getJob"),
+    expectBodyRequest("/trpc/api.publish.unpublish", '"confirm":true'),
+    expectRequest("/trpc/api.domains.list"),
+    expectBodyRequest("/trpc/api.domains.create", '"domain":"example.com"'),
+    expectBodyRequest("/trpc/api.domains.update", '"domain":"www.example.com"'),
+    expectBodyRequest("/trpc/api.domains.delete", '"confirm":true'),
+    expectBodyRequest("/trpc/api.domains.verify", '"domainId":"domain-id"'),
+    expectRequest("/trpc/api.assetFolders.list"),
+    expectBodyRequest("/trpc/api.assetFolders.create", '"name":"Images"'),
+    expectBodyRequest("/trpc/api.assetFolders.update", '"parentId":null'),
+    expectBodyRequest(
+      "/trpc/api.assetFolders.delete",
+      '"folderId":"folder-id"'
+    ),
+    expectBodyRequest("/trpc/api.assetFolders.duplicate", '"parentId":null'),
+    expectRequest("/trpc/api.assets.list"),
+    expectRequest("/trpc/api.assets.findUsage"),
+    expectBodyRequest("/trpc/api.assets.replace", '"confirm":true'),
+    expectBodyRequest(
+      "/trpc/api.assets.delete",
+      '"assetIdsOrPrefixes":["asset-id"]'
+    ),
+    expectBodyRequest("/trpc/api.assets.duplicate", '"folderId":null'),
+    expectRequest("/trpc/api.projects.permissions"),
+    expectRequest("/trpc/api.folders.list"),
+    expectBodyRequest("/trpc/api.build.patch", '"baseVersion":2'),
+    expectBodyRequest("/trpc/build.restorePoint", '"baseVersion":3'),
+  ]);
+  expect(decodeURIComponent(requests[0]?.search ?? "")).toContain(
+    '"include":["pages"]'
+  );
+  expect(decodeURIComponent(requests[0]?.search ?? "")).toContain(
+    '"version":2'
+  );
+});
+
+test("reports invalid build patch transactions", async () => {
+  await expect(
+    applyBuildPatch({
+      ...apiParams,
+      baseVersion: 2,
+      transactions: [{ id: "tx-1" }],
+    })
+  ).rejects.toThrow("Invalid patch JSON:");
+});
+
+test("parses build patch transaction input", () => {
+  expect(
+    parseBuildPatchTransactions({
+      transactions: [
+        {
+          id: "tx-1",
+          payload: [
+            {
+              namespace: "pages",
+              patches: [
+                { op: "replace", path: ["meta", "siteName"], value: "Site" },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+  ).toEqual([
+    {
+      id: "tx-1",
+      payload: [
+        {
+          namespace: "pages",
+          patches: [
+            { op: "replace", path: ["meta", "siteName"], value: "Site" },
+          ],
+        },
+      ],
+    },
+  ]);
+});
+
+test("summarizes build patch transactions", () => {
+  expect(
+    getBuildPatchSummary([
+      {
+        id: "tx-1",
+        payload: [
+          {
+            namespace: "pages",
+            patches: [
+              { op: "replace", path: ["meta", "siteName"], value: "Site" },
+            ],
+          },
+          {
+            namespace: "styles",
+            patches: [
+              { op: "remove", path: ["style-1"] },
+              { op: "remove", path: ["style-2"] },
+            ],
+          },
+        ],
+      },
+    ])
+  ).toEqual({
+    transactionCount: 1,
+    patchCount: 3,
+    namespaces: ["pages", "styles"],
+  });
+});
+
+test("uploads assets as binary requests", async () => {
+  const fetch = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ uploadedAssets: [], deduplicated: false }), {
+      headers: {
+        "content-type": "application/json",
+      },
+    })
+  );
+  vi.stubGlobal("fetch", fetch);
+
+  const file = new Uint8Array([1, 2, 3]);
+  await uploadAsset({
+    authToken: "token",
+    origin: "https://p-090e6e14-ae50-4b2e-bd22-71733cec05bb.apps.webstudio.is",
+    projectId: "090e6e14-ae50-4b2e-bd22-71733cec05bb",
+    upload: {
+      asset: {
+        id: "asset-id",
+        projectId: "source-project",
+        type: "image",
+        name: "image.png",
+        filename: "image.png",
+        description: "Campaign photo",
+        folderId: "campaign",
+        format: "png",
+        size: 3,
+        meta: { width: 10, height: 20 },
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+      data: file,
+    },
+  });
+
+  expect(fetch).toHaveBeenCalledOnce();
+  const [url, init] = fetch.mock.calls[0] as [URL, RequestInit];
+  expect(url.href).toBe(
+    "https://apps.webstudio.is/rest/assets/uploads/image.png?projectId=090e6e14-ae50-4b2e-bd22-71733cec05bb&type=image&folderId=campaign&width=10&height=20&format=png"
+  );
+  expect(init.method).toBe("POST");
+  expect(init.body).toBe(file);
+  expect(init.headers).toBeInstanceOf(Headers);
+  expect((init.headers as Headers).get("x-auth-token")).toBe("token");
+  expect((init.headers as Headers).get("x-webstudio-asset-description")).toBe(
+    "Campaign photo"
+  );
+  expect((init.headers as Headers).get("content-type")).toBe(
+    "application/octet-stream"
+  );
+});
+
+test("rejects malformed successful asset upload responses", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+      })
+    )
+  );
+
+  await expect(
+    uploadAsset({
+      ...apiParams,
+      upload: {
+        asset: createImageAssetFixture(),
+        data: new Uint8Array([1, 2, 3]),
+      },
+    })
+  ).rejects.toThrow("Assets API returned an invalid upload response");
+});
+
+test("requests a forced asset upload and exposes deduplication", async () => {
+  const asset = {
+    id: "asset-1",
+    projectId: "project-1",
+    type: "file" as const,
+    name: "document.txt",
+    filename: "document",
+    format: "txt",
+    size: 5,
+    meta: {},
+    createdAt: "2024-01-01T00:00:00.000Z",
+  };
+  const fetch = vi
+    .fn()
+    .mockResolvedValue(
+      new Response(
+        JSON.stringify({ uploadedAssets: [asset], deduplicated: true }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+  vi.stubGlobal("fetch", fetch);
+
+  const uploaded = await uploadAsset({
+    origin: "https://apps.webstudio.is",
+    authToken: "token",
+    projectId: "project-1",
+    upload: { asset, data: new Blob(["asset"]), force: true },
+  });
+
+  expect((fetch.mock.calls[0]?.[0] as URL).searchParams.get("force")).toBe(
+    "true"
+  );
+  expect(uploaded[0]).toMatchObject({ deduplicated: true });
+});
+
+test("loads project bundle by build id without auth headers", async () => {
+  const project = createPublishedProjectBundleFixture();
+  const fetch = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify([{ result: { data: project } }]), {
+      headers: {
+        "content-type": "application/json",
+      },
+    })
+  );
+  vi.stubGlobal("fetch", fetch);
+
+  await loadProjectBundleByBuildId({
+    buildId: project.build.id,
+    origin: "https://p-090e6e14-ae50-4b2e-bd22-71733cec05bb.apps.webstudio.is",
+  });
+
+  expect(fetch).toHaveBeenCalledOnce();
+  const [url, init] = fetch.mock.calls[0] as [RequestInfo | URL, RequestInit];
+  expect(decodeURIComponent(String(url))).toContain(
+    `"bundleVersion":"${bundleVersion}"`
+  );
+  expect(init.headers).toMatchObject({
+    "content-type": "application/json",
+  });
+  expect((init.headers as Record<string, string>)["x-auth-token"]).toBe(
+    undefined
+  );
+  expect((init.headers as Record<string, string>).authorization).toBe(
+    undefined
+  );
+});
+
+test("reports asset upload errors", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ errors: "Upload failed" }), {
+        headers: {
+          "content-type": "application/json",
+        },
+      })
+    )
+  );
+
+  await expect(
+    uploadAsset({
+      authToken: "token",
+      origin:
+        "https://p-090e6e14-ae50-4b2e-bd22-71733cec05bb.apps.webstudio.is",
+      projectId: "090e6e14-ae50-4b2e-bd22-71733cec05bb",
+      upload: {
+        asset: {
+          id: "asset-id",
+          projectId: "source-project",
+          type: "file",
+          name: "document.pdf",
+          format: "pdf",
+          size: 3,
+          meta: {},
+          createdAt: "2024-01-01T00:00:00.000Z",
+        },
+        data: new Uint8Array([1, 2, 3]),
+      },
+    })
+  ).rejects.toThrow("Upload failed");
+});
+
+test("rejects unsuccessful asset uploads without a structured error", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({}), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      })
+    )
+  );
+
+  await expect(
+    uploadAsset({
+      authToken: "token",
+      origin: "https://apps.webstudio.is",
+      projectId: "project-id",
+      upload: {
+        asset: {
+          id: "asset-id",
+          projectId: "project-id",
+          type: "file",
+          name: "document.pdf",
+          format: "pdf",
+          size: 3,
+          meta: {},
+          createdAt: "2024-01-01T00:00:00.000Z",
+        },
+        data: new Uint8Array([1, 2, 3]),
+      },
+    })
+  ).rejects.toMatchObject({
+    message: "Assets API request failed",
+    status: 500,
+  });
+});
+
+test("uploads assets with one retry and aggregated failures", async () => {
+  const asset = createImageAssetFixture({ name: "image.png" });
+  const otherAsset = createImageAssetFixture({
+    id: "asset-2",
+    name: "other.png",
+  });
+  const attempts = new Map<string, number>();
+  const fetch = vi.fn(async (request: URL | RequestInfo) => {
+    const url = new URL(request.toString());
+    const assetName = url.pathname.split("/").at(-1) ?? "";
+    const attempt = (attempts.get(assetName) ?? 0) + 1;
+    attempts.set(assetName, attempt);
+    if (assetName === "image.png" && attempt === 2) {
+      return new Response(
+        JSON.stringify({ uploadedAssets: [asset], deduplicated: false }),
+        {
+          headers: { "content-type": "application/json" },
+        }
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        errors:
+          assetName === "image.png" ? "Temporary failure" : "Upload failed",
+      }),
+      {
+        headers: { "content-type": "application/json" },
+      }
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  await expect(
+    uploadAssets({
+      assets: [asset, otherAsset],
+      ...apiParams,
+      readAssetData: async (asset) => new Blob([asset.name]),
+    })
+  ).rejects.toThrow("Failed to upload assets: other.png: Upload failed");
+
+  expect(fetch).toHaveBeenCalledTimes(4);
+});
+
+test("keeps uploaded assets in input order", async () => {
+  const first = createImageAssetFixture({ id: "first", name: "first.png" });
+  const second = createImageAssetFixture({ id: "second", name: "second.png" });
+  const fetch = vi.fn(async (request: URL | RequestInfo) => {
+    const url = new URL(request.toString());
+    const name = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+    if (name === "first.png") {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return new Response(
+      JSON.stringify({
+        uploadedAssets: [name === "first.png" ? first : second],
+        deduplicated: false,
+      }),
+      {
+        headers: { "content-type": "application/json" },
+      }
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  await expect(
+    uploadAssets({
+      assets: [first, second],
+      ...apiParams,
+      readAssetData: async (asset) => new Blob([asset.name]),
+    })
+  ).resolves.toEqual([first, second]);
+});
+
+test("serializes uploads with identical content", async () => {
+  const first = createImageAssetFixture({ id: "first", name: "first.png" });
+  const second = createImageAssetFixture({ id: "second", name: "second.png" });
+  let activeUploads = 0;
+  let maxActiveUploads = 0;
+  const fetch = vi.fn(async (request: URL | RequestInfo) => {
+    activeUploads += 1;
+    maxActiveUploads = Math.max(maxActiveUploads, activeUploads);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    activeUploads -= 1;
+    const name = decodeURIComponent(
+      new URL(request.toString()).pathname.split("/").at(-1) ?? ""
+    );
+    return new Response(
+      JSON.stringify({
+        uploadedAssets: [name === "first.png" ? first : second],
+        deduplicated: false,
+      }),
+      { headers: { "content-type": "application/json" } }
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  await expect(
+    uploadAssets({
+      assets: [first, second],
+      ...apiParams,
+      readAssetData: async () => new Uint8Array([1, 2, 3]),
+    })
+  ).resolves.toEqual([first, second]);
+
+  expect(maxActiveUploads).toBe(1);
+});
+
+test("retries local asset reads before reporting an upload failure", async () => {
+  const asset = createImageAssetFixture({ name: "image.png" });
+  let reads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ uploadedAssets: [asset], deduplicated: false }),
+          { headers: { "content-type": "application/json" } }
+        )
+    )
+  );
+
+  await expect(
+    uploadAssets({
+      assets: [asset],
+      ...apiParams,
+      readAssetData: async () => {
+        reads += 1;
+        if (reads === 1) {
+          throw new Error("Temporary read failure");
+        }
+        return new Uint8Array([1, 2, 3]);
+      },
+    })
+  ).resolves.toEqual([asset]);
+
+  expect(reads).toBe(2);
+});
+
+test("uploads project asset descriptors with local data readers", async () => {
+  const uploadedAsset = createImageAssetFixture({ name: "image.png" });
+  const fetch = vi.fn(
+    async () =>
+      new Response(
+        JSON.stringify({
+          uploadedAssets: [uploadedAsset],
+          deduplicated: false,
+        }),
+        { headers: { "content-type": "application/json" } }
+      )
+  );
+  vi.stubGlobal("fetch", fetch);
+
+  await expect(
+    uploadProjectAsset({
+      ...apiParams,
+      asset: {
+        name: "image.png",
+        type: "image",
+        format: "png",
+        description: "Campaign photo",
+        folderId: "campaign",
+        meta: { width: 10, height: 20 },
+      },
+      readAssetData: async () => new Uint8Array([1, 2, 3]),
+    })
+  ).resolves.toEqual({ uploaded: [uploadedAsset] });
+
+  await expect(
+    uploadProjectAsset({
+      ...apiParams,
+      asset: {
+        name: "video.mp4",
+        type: "video",
+        format: "mp4",
+        meta: { width: 1920, height: 1080 },
+      },
+      readAssetData: async () => new Uint8Array([1, 2, 3]),
+    })
+  ).resolves.toEqual({ uploaded: [uploadedAsset] });
+
+  await expect(
+    uploadProjectAssets({
+      ...apiParams,
+      assets: [
+        {
+          name: "image.png",
+          type: "image",
+          format: "png",
+          meta: { width: 10, height: 20 },
+        },
+      ],
+      readAssetData: async () => new Uint8Array([1, 2, 3]),
+    })
+  ).resolves.toEqual({
+    uploaded: [uploadedAsset],
+    failed: [],
+    ambiguous: [],
+  });
+
+  const calls = fetch.mock.calls as unknown as Array<[URL, RequestInit]>;
+  expect(new URL(calls[0][0].toString()).searchParams.get("folderId")).toBe(
+    "campaign"
+  );
+  for (const [request] of calls) {
+    const url = new URL(request.toString());
+    expect(url.searchParams.has("assetId")).toBe(false);
+  }
+  expect(new Headers(calls[0][1].headers).get("x-webstudio-asset-meta")).toBe(
+    JSON.stringify({ width: 10, height: 20 })
+  );
+  const videoUrl = new URL(calls[1][0].toString());
+  expect(videoUrl.searchParams.get("type")).toBe("video");
+  expect(videoUrl.searchParams.get("width")).toBe("1920");
+  expect(videoUrl.searchParams.get("height")).toBe("1080");
+});
+
+test("reports successful and failed project asset uploads separately", async () => {
+  const uploadedAsset = createImageAssetFixture({ name: "uploaded.png" });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (request: URL | RequestInfo) => {
+      const name = decodeURIComponent(
+        new URL(request.toString()).pathname.split("/").at(-1) ?? ""
+      );
+      if (name === "uploaded.png") {
+        return new Response(
+          JSON.stringify({
+            uploadedAssets: [uploadedAsset],
+            deduplicated: false,
+          }),
+          { headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify({ errors: "Upload failed" }), {
+        headers: { "content-type": "application/json" },
+      });
+    })
+  );
+
+  await expect(
+    uploadProjectAssets({
+      ...apiParams,
+      assets: [
+        {
+          name: "uploaded.png",
+          type: "image",
+          format: "png",
+          meta: { width: 10, height: 20 },
+        },
+        {
+          name: "failed.png",
+          type: "image",
+          format: "png",
+          meta: { width: 10, height: 20 },
+        },
+      ],
+      readAssetData: async (asset) => new Blob([asset.name]),
+    })
+  ).resolves.toEqual({
+    uploaded: [uploadedAsset],
+    failed: [{ index: 1, name: "failed.png", error: "Upload failed" }],
+    ambiguous: [],
+  });
+});
+
+test("does not retry a forced upload after an ambiguous server failure", async () => {
+  const fetch = vi.fn(
+    async () => new Response("response failed after commit", { status: 504 })
+  );
+  vi.stubGlobal("fetch", fetch);
+
+  await expect(
+    uploadProjectAssets({
+      ...apiParams,
+      assets: [
+        {
+          name: "hero.png",
+          type: "image",
+          format: "png",
+          meta: { width: 10, height: 20 },
+          force: true,
+        },
+      ],
+      readAssetData: async () => new Uint8Array([1, 2, 3]),
+    })
+  ).resolves.toEqual({
+    uploaded: [],
+    failed: [],
+    ambiguous: [
+      {
+        index: 0,
+        name: "hero.png",
+        error: expect.stringContaining("HTTP status: 504"),
+      },
+    ],
+  });
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+test("warns before retrying one ambiguous forced upload", async () => {
+  const fetch = vi.fn(
+    async () => new Response("response failed after commit", { status: 504 })
+  );
+  vi.stubGlobal("fetch", fetch);
+
+  await expect(
+    uploadProjectAsset({
+      ...apiParams,
+      asset: {
+        name: "hero.png",
+        type: "image",
+        format: "png",
+        meta: { width: 10, height: 20 },
+        force: true,
+      },
+      readAssetData: async () => new Uint8Array([1, 2, 3]),
+    })
+  ).rejects.toThrow("Forced asset upload may already be committed: hero.png:");
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+test("identifies failed duplicate asset names by input index", async () => {
+  const uploadedAsset = createImageAssetFixture({ name: "duplicate.png" });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (request: URL | RequestInfo) => {
+      if (new URL(request.toString()).searchParams.get("force") !== "true") {
+        return new Response(
+          JSON.stringify({
+            uploadedAssets: [uploadedAsset],
+            deduplicated: false,
+          }),
+          { headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify({ errors: "Upload failed" }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    })
+  );
+
+  await expect(
+    uploadProjectAssets({
+      ...apiParams,
+      assets: [
+        { name: "duplicate.png", type: "file", format: "txt" },
+        { name: "duplicate.png", type: "file", format: "txt", force: true },
+      ],
+      readAssetData: async (asset) => new Blob([asset.description ?? ""]),
+    })
+  ).resolves.toEqual({
+    uploaded: [uploadedAsset],
+    failed: [{ index: 1, name: "duplicate.png", error: "Upload failed" }],
+    ambiguous: [],
+  });
+});
+
+test("updates asset content through the stable asset revision endpoint", async () => {
+  const revision = {
+    ...createImageAssetFixture({ id: "asset-id", name: "old_hash.png" }),
+    type: "file" as const,
+    format: "json",
+    meta: {},
+    name: "new_hash.json",
+  };
+  const request = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ asset: revision }), {
+        headers: { "content-type": "application/json" },
+      })
+  );
+
+  await expect(
+    updateProjectAssetContent({
+      ...apiParams,
+      assetId: "asset/id",
+      expectedName: "old_hash.json",
+      extension: "json",
+      readAssetData: async () => '{"theme":"dark"}',
+      request,
+    })
+  ).resolves.toEqual({ asset: revision });
+
+  const [url, init] = request.mock.calls[0] as unknown as [URL, RequestInit];
+  expect(url.pathname).toBe("/rest/assets/asset%2Fid/content");
+  expect(url.searchParams.get("projectId")).toBe(apiParams.projectId);
+  expect(url.searchParams.get("expectedName")).toBe("old_hash.json");
+  expect(url.searchParams.get("extension")).toBe("json");
+  expect(init).toMatchObject({ method: "PUT", body: '{"theme":"dark"}' });
+  expect(new Headers(init.headers).get("x-auth-token")).toBe(
+    apiParams.authToken
+  );
+});
+
+test("surfaces asset content revision conflicts", async () => {
+  const request = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ errors: "File changed" }), {
+        status: 409,
+        headers: { "content-type": "application/json" },
+      })
+  );
+
+  await expect(
+    updateProjectAssetContent({
+      ...apiParams,
+      assetId: "asset-id",
+      expectedName: "old_hash.json",
+      readAssetData: async () => "stale",
+      request,
+    })
+  ).rejects.toMatchObject({ message: "File changed", status: 409 });
+});
+
+test("reports an asset update as successful when the committed content can be confirmed", async () => {
+  const revision = {
+    ...createImageAssetFixture({ id: "asset-id", name: "new_hash.json" }),
+    type: "file" as const,
+    format: "json",
+    meta: {},
+  };
+  const request = vi.fn(
+    async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = new URL(input.toString());
+      if (init?.method === "PUT") {
+        return new Response("response failed after commit", { status: 500 });
+      }
+      if (url.pathname.endsWith("/content")) {
+        return new Response('{"theme":"dark"}');
+      }
+      return new Response(JSON.stringify({ asset: revision }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+  );
+
+  await expect(
+    updateProjectAssetContent({
+      ...apiParams,
+      assetId: "asset-id",
+      expectedName: "old_hash.json",
+      readAssetData: async () => '{"theme":"dark"}',
+      request,
+    })
+  ).resolves.toEqual({ asset: revision });
+  expect(request).toHaveBeenCalledTimes(4);
+});
+
+test("does not confirm an asset update while its revision is changing", async () => {
+  const revisions = ["first_hash.json", "second_hash.json"];
+  const request = vi.fn(
+    async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = new URL(input.toString());
+      if (init?.method === "PUT") {
+        return new Response("response failed after commit", { status: 500 });
+      }
+      if (url.pathname.endsWith("/content")) {
+        return new Response('{"theme":"dark"}');
+      }
+      const name = revisions.shift() ?? "second_hash.json";
+      return new Response(
+        JSON.stringify({
+          asset: {
+            ...createImageAssetFixture({ id: "asset-id", name }),
+            type: "file",
+            format: "json",
+            meta: {},
+          },
+        }),
+        { headers: { "content-type": "application/json" } }
+      );
+    }
+  );
+
+  await expect(
+    updateProjectAssetContent({
+      ...apiParams,
+      assetId: "asset-id",
+      expectedName: "old_hash.json",
+      readAssetData: async () => '{"theme":"dark"}',
+      request,
+    })
+  ).rejects.toMatchObject({ code: "ASSET_UPDATE_COMMIT_UNCERTAIN" });
+});
+
+test("reports recovery guidance when an asset update commit cannot be confirmed", async () => {
+  const current = {
+    ...createImageAssetFixture({ id: "asset-id", name: "old_hash.json" }),
+    type: "file" as const,
+    format: "json",
+    meta: {},
+  };
+  const request = vi.fn(
+    async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = new URL(input.toString());
+      if (init?.method === "PUT") {
+        return new Response("response failed", { status: 500 });
+      }
+      if (url.pathname.endsWith("/content")) {
+        return new Response('{"theme":"light"}');
+      }
+      return new Response(JSON.stringify({ asset: current }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+  );
+
+  await expect(
+    updateProjectAssetContent({
+      ...apiParams,
+      assetId: "asset-id",
+      expectedName: "old_hash.json",
+      readAssetData: async () => '{"theme":"dark"}',
+      request,
+    })
+  ).rejects.toMatchObject({
+    code: "ASSET_UPDATE_COMMIT_UNCERTAIN",
+    message: expect.stringContaining(
+      "Read the current asset and download its content"
+    ),
+  });
+});
+
+test("updates asset metadata through the unified Assets endpoint", async () => {
+  const updated = createImageAssetFixture({ id: "asset-id" });
+  const request = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ asset: updated }), {
+        headers: { "content-type": "application/json" },
+      })
+  );
+
+  await expect(
+    updateProjectAsset({
+      ...apiParams,
+      assetId: "asset/id",
+      values: { filename: "Campaign", folderId: null },
+      request,
+    })
+  ).resolves.toEqual({ asset: updated });
+
+  const [url, init] = request.mock.calls[0] as unknown as [URL, RequestInit];
+  expect(url.pathname).toBe("/rest/assets/asset%2Fid");
+  expect(url.searchParams.get("projectId")).toBe(apiParams.projectId);
+  expect(init).toMatchObject({
+    method: "PATCH",
+    body: JSON.stringify({ filename: "Campaign", folderId: null }),
+  });
+  expect(new Headers(init.headers).get("x-auth-token")).toBe(
+    apiParams.authToken
+  );
+});
+
+test("deletes an asset through the unified Assets endpoint", async () => {
+  const request = vi.fn(async () => new Response(null, { status: 204 }));
+
+  await expect(
+    deleteProjectAsset({
+      ...apiParams,
+      assetId: "asset/id",
+      request,
+    })
+  ).resolves.toBeUndefined();
+
+  const [url, init] = request.mock.calls[0] as unknown as [URL, RequestInit];
+  expect(url.pathname).toBe("/rest/assets/asset%2Fid");
+  expect(url.searchParams.get("projectId")).toBe(apiParams.projectId);
+  expect(init).toMatchObject({ method: "DELETE" });
+  expect(new Headers(init.headers).get("x-auth-token")).toBe(
+    apiParams.authToken
+  );
+});
+
+test("reads asset records and ranged content through the Assets REST data plane", async () => {
+  const asset = createImageAssetFixture({ id: "asset-id" });
+  const request = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ assets: [asset] }), {
+        headers: { "content-type": "application/json" },
+      })
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ asset }), {
+        headers: { "content-type": "application/json" },
+      })
+    )
+    .mockResolvedValueOnce(new Response("data", { status: 206 }));
+
+  await expect(listProjectAssets({ ...apiParams, request })).resolves.toEqual({
+    assets: [asset],
+  });
+  await expect(
+    getProjectAsset({ ...apiParams, assetId: "asset/id", request })
+  ).resolves.toEqual({ asset });
+  await expect(
+    readProjectAssetContent({
+      ...apiParams,
+      assetId: "asset/id",
+      range: { offset: 2, length: 4 },
+      request,
+    })
+  ).resolves.toMatchObject({ status: 206 });
+
+  const [contentUrl, contentInit] = request.mock.calls[2] as [URL, RequestInit];
+  expect(contentUrl.pathname).toBe("/rest/assets/asset%2Fid/content");
+  expect(new Headers(contentInit.headers).get("range")).toBe("bytes=2-5");
+});
+
+test("manages folders through the Assets REST data plane", async () => {
+  const folder = {
+    id: "folder-1",
+    projectId: apiParams.projectId,
+    name: "Blog",
+    createdAt: "2026-07-25T00:00:00.000Z",
+  };
+  const request = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ folders: [folder] }), {
+        headers: { "content-type": "application/json" },
+      })
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ folder }), {
+        headers: { "content-type": "application/json" },
+      })
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ folder }), {
+        status: 201,
+        headers: { "content-type": "application/json" },
+      })
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ folder: { ...folder, name: "Posts" } }), {
+        headers: { "content-type": "application/json" },
+      })
+    )
+    .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+  await expect(
+    listProjectAssetFolders({ ...apiParams, request })
+  ).resolves.toEqual({ folders: [folder] });
+  await expect(
+    getProjectAssetFolder({
+      ...apiParams,
+      folderId: "folder/id",
+      request,
+    })
+  ).resolves.toEqual({ folder });
+  await expect(
+    createProjectAssetFolder({ ...apiParams, name: "Blog", request })
+  ).resolves.toEqual({ folder });
+  await expect(
+    updateProjectAssetFolder({
+      ...apiParams,
+      folderId: "folder/id",
+      values: { name: "Posts" },
+      request,
+    })
+  ).resolves.toEqual({ folder: { ...folder, name: "Posts" } });
+  await expect(
+    deleteProjectAssetFolder({
+      ...apiParams,
+      folderId: "folder/id",
+      request,
+    })
+  ).resolves.toBeUndefined();
+
+  expect((request.mock.calls[0]?.[0] as URL).pathname).toBe(
+    "/rest/assets/folders"
+  );
+  expect((request.mock.calls[3]?.[0] as URL).pathname).toBe(
+    "/rest/assets/folders/folder%2Fid"
+  );
+  expect(request.mock.calls[3]?.[1]).toMatchObject({ method: "PATCH" });
+  expect(request.mock.calls[4]?.[1]).toMatchObject({ method: "DELETE" });
+});
+
+test("keeps browser asset content updates on the requested origin", async () => {
+  const revision = {
+    ...createImageAssetFixture({ id: "asset-id" }),
+    type: "file" as const,
+    format: "md",
+    meta: {},
+  };
+  const request = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ asset: revision }), {
+        headers: { "content-type": "application/json" },
+      })
+  );
+
+  await updateProjectAssetContent({
+    ...apiParams,
+    origin:
+      "https://p-090e6e14-ae50-4b2e-bd22-71733cec05bb-dot-vite.wstd.dev:5175",
+    requestOrigin:
+      "https://p-090e6e14-ae50-4b2e-bd22-71733cec05bb-dot-vite.wstd.dev:5175",
+    assetId: "asset-id",
+    expectedName: "readme_hash.md",
+    readAssetData: async () => "# Readme",
+    request,
+  });
+
+  const [url] = request.mock.calls[0] as unknown as [URL];
+  expect(url.origin).toBe(
+    "https://p-090e6e14-ae50-4b2e-bd22-71733cec05bb-dot-vite.wstd.dev:5175"
+  );
+});
+
+test("normalizes synced project bundles for local storage", () => {
+  const index = {
+    format: "webstudio-content-database" as const,
+    version: 1 as const,
+    assetRevision: `sha256:${"b".repeat(64)}`,
+    documents: [],
+    fieldCatalog: {
+      format: "webstudio-builder-asset-field-catalog" as const,
+      version: 1 as const,
+      canonicalRevision: `sha256:${"b".repeat(64)}`,
+      documentCount: 0,
+      fields: {},
+    },
+    integrity: {
+      algorithm: "sha256" as const,
+      checksum: `sha256:${"c".repeat(64)}`,
+    },
+  };
+  const bundle = createPublishedProjectBundleFixture({
+    bundleVersion: "bundle-old",
+    assetIndex: index,
+    assetFolders: [
+      {
+        id: "folder-1",
+        projectId: "project-1",
+        name: "Images",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+
+  expect(toLocalProjectBundle(bundle)).toMatchObject({
+    bundleVersion,
+    build: bundle.build,
+    page: bundle.page,
+    pages: bundle.pages,
+    assets: bundle.assets,
+    assetFolders: bundle.assetFolders,
+    user: bundle.user,
+    projectDomain: bundle.projectDomain,
+    projectTitle: bundle.projectTitle,
+    assetIndex: bundle.assetIndex,
+    origin: bundle.origin,
+  });
+});
+
+const readRequestBody = async (request: IncomingMessage) => {
+  const chunks = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+};
+
+test("imports project bundle through staged upload", async () => {
+  const uploadChunks: Buffer[] = [];
+  let trpcBody: unknown;
+
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url ?? "/", "http://localhost");
+
+    if (request.method === "POST" && url.pathname === stagedUploadPath) {
+      response.writeHead(201, {
+        Location: `http://${request.headers.host}${stagedUploadPath}/upload-id`,
+        "Tus-Resumable": "1.0.0",
+      });
+      response.end();
+      return;
+    }
+
+    if (
+      request.method === "PATCH" &&
+      url.pathname === `${stagedUploadPath}/upload-id`
+    ) {
+      uploadChunks.push(await readRequestBody(request));
+      response.writeHead(204, {
+        "Tus-Resumable": "1.0.0",
+        "Upload-Offset": String(
+          uploadChunks.reduce((size, chunk) => size + chunk.byteLength, 0)
+        ),
+      });
+      response.end();
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      url.pathname === "/trpc/build.importProjectBundle"
+    ) {
+      trpcBody = JSON.parse((await readRequestBody(request)).toString("utf8"));
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([{ result: { data: { version: 2 } } }]));
+      return;
+    }
+
+    response.writeHead(404);
+    response.end();
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  try {
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("Server address is unavailable");
+    }
+
+    await expect(
+      importProjectBundle({
+        authToken: "token",
+        origin: `http://127.0.0.1:${address.port}`,
+        projectId: "project-id",
+        data: {
+          largeContent: "x".repeat(3 * 1024 * 1024 + 1),
+          assetIndex: { marker: "derived-index-marker" },
+        } as unknown as PublishedProjectBundle,
+      })
+    ).resolves.toEqual({ version: 2 });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+
+  expect(uploadChunks).toHaveLength(2);
+  expect(Buffer.concat(uploadChunks).toString("utf8")).not.toContain(
+    "derived-index-marker"
+  );
+  expect(JSON.stringify(trpcBody)).toContain('"uploadId":"upload-id"');
+  expect(JSON.stringify(trpcBody)).not.toContain("largeContent");
+});
+
+test("imports project bundle with assets and retries missing asset uploads", async () => {
+  const asset = createImageAssetFixture({ name: "image.png" });
+  const bundle = createPublishedProjectBundleFixture({ assets: [asset] });
+  const calls: string[] = [];
+  const uploadUrls: string[] = [];
+  const uploadOffsets = new Map<string, number>();
+  let importAttempts = 0;
+  let uploadAttempts = 0;
+
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url ?? "/", "http://localhost");
+    calls.push(`${request.method} ${url.pathname}`);
+
+    if (
+      request.method === "GET" &&
+      url.pathname === "/trpc/build.checkProjectBuildPermission"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([{ result: { data: undefined } }]));
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      url.pathname === "/rest/assets/uploads/image.png"
+    ) {
+      uploadAttempts += 1;
+      uploadUrls.push(url.href);
+      await readRequestBody(request);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          uploadedAssets: [
+            createImageAssetFixture({
+              id: `server-generated-asset-${uploadAttempts}`,
+              name: "image_destination.png",
+            }),
+          ],
+          deduplicated: false,
+        })
+      );
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === stagedUploadPath) {
+      response.writeHead(201, {
+        Location: `http://${request.headers.host}${stagedUploadPath}/upload-id-${importAttempts}`,
+        "Tus-Resumable": "1.0.0",
+      });
+      response.end();
+      return;
+    }
+
+    if (
+      request.method === "PATCH" &&
+      url.pathname.startsWith(`${stagedUploadPath}/upload-id-`)
+    ) {
+      const chunk = await readRequestBody(request);
+      const offset = (uploadOffsets.get(url.pathname) ?? 0) + chunk.byteLength;
+      uploadOffsets.set(url.pathname, offset);
+      response.writeHead(204, {
+        "Tus-Resumable": "1.0.0",
+        "Upload-Offset": String(offset),
+      });
+      response.end();
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      url.pathname === "/trpc/build.importProjectBundle"
+    ) {
+      importAttempts += 1;
+      await readRequestBody(request);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          importAttempts === 1
+            ? {
+                error: {
+                  message: "Imported asset files are missing: image.png",
+                  code: -32603,
+                  data: { code: "INTERNAL_SERVER_ERROR" },
+                },
+              }
+            : { result: { data: { version: 2 } } },
+        ])
+      );
+      return;
+    }
+
+    response.writeHead(404);
+    response.end();
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const importAttemptMessages: string[] = [];
+  const missingAssetMessages: string[] = [];
+  const uploadAssetMessages: string[] = [];
+
+  try {
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("Server address is unavailable");
+    }
+
+    await expect(
+      importProjectBundleWithAssets({
+        authToken: "token",
+        origin: `http://127.0.0.1:${address.port}`,
+        projectId: "project-id",
+        data: bundle,
+        readAssetData: async () => new Blob(["asset"]),
+        onImportAttempt: () => importAttemptMessages.push("attempt"),
+        onMissingAssets: (assets) =>
+          missingAssetMessages.push(
+            assets.map((asset) => asset.name).join(",")
+          ),
+        onUploadAssets: (assets) =>
+          uploadAssetMessages.push(assets.map((asset) => asset.name).join(",")),
+      })
+    ).resolves.toEqual({ version: 2 });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+
+  expect(calls).toContain("GET /trpc/build.checkProjectBuildPermission");
+  expect(importAttempts).toBe(2);
+  expect(uploadAttempts).toBe(1);
+  expect(uploadUrls.every((url) => url.includes("assetId=") === false)).toBe(
+    true
+  );
+  expect(uploadOffsets.size).toBe(2);
+  expect(importAttemptMessages).toEqual(["attempt", "attempt"]);
+  expect(missingAssetMessages).toEqual([]);
+  expect(uploadAssetMessages).toEqual(["image.png"]);
+});
+
+test("rejects project bundles over the import size limit", async () => {
+  let requestCount = 0;
+  const server = createServer((_request, response) => {
+    requestCount += 1;
+    response.writeHead(500);
+    response.end();
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  try {
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("Server address is unavailable");
+    }
+
+    await expect(
+      importProjectBundle({
+        authToken: "token",
+        origin: `http://127.0.0.1:${address.port}`,
+        projectId: "project-id",
+        data: {
+          largeContent: "x".repeat(20 * 1024 * 1024),
+        } as unknown as PublishedProjectBundle,
+      })
+    ).rejects.toThrow(
+      "Project bundle is too large to import. Maximum size is 20 MiB."
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+
+  expect(requestCount).toBe(0);
 });

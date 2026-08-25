@@ -12,6 +12,7 @@ import {
   type LoaderFunctionArgs,
 } from "@remix-run/server-runtime";
 import * as projectApi from "@webstudio-is/project/index.server";
+import { defaultRole, type Role } from "@webstudio-is/project";
 import { db as authDb } from "@webstudio-is/authorization-token/index.server";
 
 import {
@@ -19,13 +20,15 @@ import {
   authorizeProject,
 } from "@webstudio-is/trpc-interface/index.server";
 import { createContext } from "~/shared/context.server";
+import { getPlanInfo } from "@webstudio-is/plans/index.server";
+import { defaultPlanFeatures } from "@webstudio-is/plans";
 import { dashboardPath, isBuilder, isDashboard } from "~/shared/router-utils";
 
 import env from "~/env/env.server";
 
 import builderStyles from "~/builder/builder.css?url";
 import { ClientOnly } from "~/shared/client-only";
-import { parseBuilderUrl } from "@webstudio-is/http-client";
+import { parseBuilderUrl } from "@webstudio-is/protocol";
 import { preventCrossOriginCookie } from "~/services/no-cross-origin-cookie";
 import { redirect } from "~/services/no-store-redirect";
 import { builderSessionStorage } from "~/services/builder-session.server";
@@ -34,6 +37,11 @@ import {
   isFetchDestination,
 } from "~/services/destinations.server";
 import { loader as authWsLoader } from "./auth.ws";
+import { getUserById } from "~/shared/db/user.server";
+import {
+  createPrivateNoStoreHeaders,
+  privateNoStoreResponseHeaders,
+} from "~/services/cache-control.server";
 export { ErrorBoundary } from "~/shared/error/error-boundary";
 
 export const links = () => {
@@ -80,7 +88,7 @@ export const loader = async (loaderArgs: LoaderFunctionArgs) => {
   }
 
   if (context.authorization.type === "anonymous") {
-    throw await authWsLoader(loaderArgs); // redirect("/auth/ws");
+    throw await authWsLoader(loaderArgs);
   }
 
   if (
@@ -98,7 +106,7 @@ export const loader = async (loaderArgs: LoaderFunctionArgs) => {
       Date.now() - context.authorization.sessionCreatedAt >
       RELOAD_ON_NAVIGATE_TIMEOUT
     ) {
-      throw await authWsLoader(loaderArgs); // start immediately instead of redirect("/auth/ws");
+      throw await authWsLoader(loaderArgs);
     }
   }
 
@@ -154,18 +162,70 @@ export const loader = async (loaderArgs: LoaderFunctionArgs) => {
           )
         : authDb.tokenDefaultPermissions;
 
-    const { userPlanFeatures } = context;
-    if (userPlanFeatures === undefined) {
-      throw new Response("User plan features are not defined", {
-        status: 404,
-      });
+    // When the project belongs to a workspace, resolve plan from the workspace owner
+    // so the owner's subscription governs all projects in the workspace
+    let role: Role | "own" = "own";
+
+    if (project.workspaceId !== null) {
+      const currentUserId =
+        context.authorization.type === "user"
+          ? context.authorization.userId
+          : undefined;
+
+      // Fetch workspace owner and current user's membership in a single query.
+      // When currentUserId is undefined (token auth), filter with a UUID that
+      // can never match so the members array comes back empty.
+      const noMatchId = "00000000-0000-0000-0000-000000000000";
+      const workspace = await context.postgrest.client
+        .from("Workspace")
+        .select("userId, members:WorkspaceMember(relation)")
+        .eq("id", project.workspaceId)
+        .eq("isDeleted", false)
+        .eq("members.userId", currentUserId ?? noMatchId)
+        .is("members.removedAt", null)
+        .single();
+
+      if (workspace.error) {
+        throw workspace.error;
+      }
+
+      const planResult = await getPlanInfo([workspace.data.userId], context);
+      const ownerPlan = planResult.get(workspace.data.userId) ?? {
+        planFeatures: defaultPlanFeatures,
+        purchases: [],
+      };
+      context.planFeatures = ownerPlan.planFeatures;
+      context.purchases = ownerPlan.purchases;
+
+      // Determine the current user's relation to the workspace
+      if (
+        currentUserId !== undefined &&
+        workspace.data.userId !== currentUserId
+      ) {
+        const membership = workspace.data.members[0];
+        role = (membership?.relation as Role) ?? defaultRole;
+
+        // When the workspace owner has downgraded, members lose access.
+        // Data stays intact but permissions are suspended.
+        if (ownerPlan.planFeatures.maxWorkspaces <= 1) {
+          throw new AuthorizationError(
+            "The workspace owner's plan no longer supports workspace access"
+          );
+        }
+      }
     }
+
+    const { planFeatures, purchases } = context;
+    const user =
+      context.authorization.type === "user"
+        ? await getUserById(context, context.authorization.userId)
+        : undefined;
 
     if (project.userId === null) {
       throw new AuthorizationError("Project must have project userId defined");
     }
 
-    const headers = new Headers();
+    const headers = createPrivateNoStoreHeaders();
 
     if (context.authorization.type === "token") {
       // To protect against cookie overwrites, we set a null session cookie if a user is using an authToken.
@@ -189,9 +249,11 @@ export const loader = async (loaderArgs: LoaderFunctionArgs) => {
       // Disallowing iframes from loading any content except the canvas
       // Still possible create iframes on canvas itself (but we use credentialless attribute)
       // Still possible create iframe without src attribute
-      // Disable workers on builder
+      // Allow blob: workers so hdr-color-input can spawn its inline canvas-rendering worker.
+      // blob: workers can only be created from JS already running in this page, so the
+      // attack surface is no wider than allowing eval.
       "Content-Security-Policy",
-      `frame-src ${url.origin}/canvas https://app.goentri.com/ https://help.webstudio.is/; worker-src 'none'`
+      `frame-src ${url.origin}/canvas https://app.goentri.com/ https://help.webstudio.is/; worker-src blob:`
     );
 
     return json(
@@ -200,7 +262,10 @@ export const loader = async (loaderArgs: LoaderFunctionArgs) => {
         authToken,
         authTokenPermissions,
         authPermit,
-        userPlanFeatures,
+        user,
+        role,
+        planFeatures,
+        purchases,
         stagingUsername: env.STAGING_USERNAME,
         stagingPassword: env.STAGING_PASSWORD,
       } as const,
@@ -211,7 +276,7 @@ export const loader = async (loaderArgs: LoaderFunctionArgs) => {
   } catch (error) {
     if (error instanceof AuthorizationError) {
       // try to re-login user if he has no access to the project
-      throw redirect(`/auth/ws`);
+      throw await authWsLoader(loaderArgs);
     }
 
     throw error;
@@ -226,9 +291,13 @@ export const loader = async (loaderArgs: LoaderFunctionArgs) => {
  *
  */
 export const headers = ({ loaderHeaders }: HeadersArgs) => {
+  const contentSecurityPolicy = loaderHeaders.get("Content-Security-Policy");
+
   return {
-    "Cache-Control": "no-store",
-    "Content-Security-Policy": loaderHeaders.get("Content-Security-Policy"),
+    ...privateNoStoreResponseHeaders,
+    ...(contentSecurityPolicy === null
+      ? {}
+      : { "Content-Security-Policy": contentSecurityPolicy }),
   };
 };
 
@@ -264,6 +333,9 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   // to not regenerate auth token and preserve canvas url
   currentUrlCopy.searchParams.delete("pageId");
   nextUrlCopy.searchParams.delete("pageId");
+
+  currentUrlCopy.searchParams.delete("instanceId");
+  nextUrlCopy.searchParams.delete("instanceId");
 
   currentUrlCopy.searchParams.delete("mode");
   nextUrlCopy.searchParams.delete("mode");

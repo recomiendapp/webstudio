@@ -15,14 +15,25 @@ import {
 import { AlertIcon } from "@webstudio-is/icons";
 import type { Prop } from "@webstudio-is/sdk";
 import { showAttribute } from "@webstudio-is/react-sdk";
-import { updateWebstudioData } from "~/shared/instance-utils";
-import { $selectedInstance } from "~/shared/awareness";
+import { executeRuntimeMutation } from "~/shared/instance-utils/data";
+import {
+  $authPermit,
+  $isContentMode,
+  $selectedInstance,
+} from "~/shared/nano-states";
+import { getPropIdsToDelete } from "@webstudio-is/project-build/runtime";
 import { $props } from "~/shared/sync/data-stores";
 import {
   $selectedInstanceInitialPropNames,
   $selectedInstancePropsMetas,
   humanizeAttribute,
 } from "./shared";
+
+export const useIsBindingResetForbidden = () => {
+  const isContentMode = useStore($isContentMode);
+  const authPermit = useStore($authPermit);
+  return isContentMode || authPermit === "edit";
+};
 
 const usePropMeta = (name: string) => {
   const store = useMemo(() => {
@@ -55,27 +66,20 @@ const useProp = (name: string) => {
   return useStore(store);
 };
 
+export const __testing__ = {
+  getPropIdsToDelete,
+};
+
 const deleteProp = (name: string) => {
   const instance = $selectedInstance.get();
-  const instanceProps = $selectedInstanceProps.get();
-  updateWebstudioData((data) => {
-    const prop = instanceProps.get(name);
-    if (prop) {
-      data.props.delete(prop.id);
-    }
-    if (prop?.type === "resource") {
-      data.resources.delete(prop.value);
-    }
-    if (instance?.component === "Image" && name === "src") {
-      const widthProp = instanceProps.get("width");
-      if (widthProp) {
-        data.props.delete(widthProp.id);
-      }
-      const heightProp = instanceProps.get("height");
-      if (heightProp) {
-        data.props.delete(heightProp.id);
-      }
-    }
+  if (instance === undefined) {
+    return;
+  }
+  executeRuntimeMutation({
+    id: "instances.deleteProps",
+    input: {
+      deletions: [{ instanceId: instance.id, name }],
+    },
   });
 };
 
@@ -103,6 +107,9 @@ export const PropertyLabel = ({
   // not existing properties cannot be deleted
   const isDeletable = prop !== undefined;
   const isResettable = useIsResettable(name);
+  const isBindingResetForbidden = useIsBindingResetForbidden();
+  const canDelete =
+    isDeletable && !(prop?.type === "expression" && isBindingResetForbidden);
   return (
     <Flex align="center" css={{ gap: theme.spacing[3] }}>
       {/* prevent label growing */}
@@ -114,7 +121,7 @@ export const PropertyLabel = ({
             onClick: (event) => {
               if (event.altKey) {
                 event.preventDefault();
-                if (isDeletable) {
+                if (canDelete) {
                   deleteProp(name);
                 }
                 return;
@@ -144,7 +151,7 @@ export const PropertyLabel = ({
                   </Text>
                 </Flex>
               )}
-              {isDeletable && (
+              {canDelete && (
                 <Button
                   color="dark"
                   // to align button text in the middle
@@ -174,6 +181,7 @@ export const PropertyLabel = ({
 export const FieldLabel = ({
   description,
   resettable = false,
+  resetDisabled = false,
   onReset,
   children,
 }: {
@@ -185,10 +193,12 @@ export const FieldLabel = ({
    * when true means field has value and colored true
    */
   resettable?: boolean;
+  resetDisabled?: boolean;
   onReset?: () => void;
   children: string;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const canReset = resettable && !resetDisabled;
   if (typeof description === "string") {
     description = (
       <Text
@@ -212,7 +222,7 @@ export const FieldLabel = ({
             onClick: (event) => {
               if (event.altKey) {
                 event.preventDefault();
-                if (resettable) {
+                if (canReset) {
                   onReset?.();
                 }
                 return;
@@ -230,7 +240,7 @@ export const FieldLabel = ({
                 {children}
               </Text>
               {description}
-              {resettable && (
+              {canReset && (
                 <Button
                   color="dark"
                   // to align button text in the middle

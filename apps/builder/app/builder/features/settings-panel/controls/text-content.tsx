@@ -13,21 +13,17 @@ import {
 import type { Instance } from "@webstudio-is/sdk";
 import { AlertIcon } from "@webstudio-is/icons";
 import { $instances } from "~/shared/sync/data-stores";
-import {
-  BindingControl,
-  BindingPopover,
-} from "~/builder/shared/binding-popover";
-import { updateWebstudioData } from "~/shared/instance-utils";
+import { validatePrimitiveValue } from "@webstudio-is/project-build/runtime";
+import { useDraftValue } from "~/builder/shared/use-draft-value";
+import { BindableExpressionControl } from "~/builder/shared/bindable-expression";
+import { executeRuntimeMutation } from "~/shared/instance-utils/data";
 import { CodeEditor } from "~/shared/code-editor";
-import {
-  type ControlProps,
-  useLocalValue,
-  VerticalLayout,
-  $selectedInstanceScope,
-  updateExpressionValue,
-  useBindingState,
-} from "../shared";
-import { FieldLabel } from "../property-label";
+import { type ControlProps, VerticalLayout } from "../shared";
+import { FieldLabel, useIsBindingResetForbidden } from "../property-label";
+import { useBindableControl } from "./use-bindable-control";
+import { evaluateExpressionWithinScope } from "~/builder/shared/binding-popover";
+import { getEditableTextTarget } from "@webstudio-is/project-build/runtime";
+import { getTextContentUpdateOperation } from "./text-content-utils";
 
 const useInstance = (instanceId: Instance["id"]) => {
   const $store = useMemo(() => {
@@ -36,47 +32,80 @@ const useInstance = (instanceId: Instance["id"]) => {
   return useStore($store);
 };
 
-const updateChildren = (
-  instanceId: Instance["id"],
-  type: "text" | "expression",
-  value: string
-) => {
-  updateWebstudioData((data) => {
-    const instance = data.instances.get(instanceId);
-    if (instance) {
-      instance.children = [{ type, value }];
-    }
-  });
-};
-
 export const TextContent = ({
   instanceId,
   computedValue,
 }: ControlProps<"textContent">) => {
   const instance = useInstance(instanceId);
-  const hasChildren = (instance?.children.length ?? 0) > 0;
-  // text content control is rendered only when empty or single child are present
-  const child = instance?.children?.[0] ?? { type: "text", value: "" };
-  const localValue = useLocalValue(String(computedValue ?? ""), (value) => {
-    if (child.type === "expression") {
-      updateExpressionValue(child.value, value);
-    } else {
-      updateChildren(instanceId, "text", value);
+  const childrenCount = instance?.children.length ?? 0;
+  const hasChildren = childrenCount > 0;
+  const hasMixedContent = childrenCount > 1;
+  const target = instance && getEditableTextTarget(instance);
+  const child = target?.child ?? { type: "text" as const, value: "" };
+  const updateChild = (type: "text" | "expression", value: string) => {
+    const operation = getTextContentUpdateOperation({ instance, type, value });
+    if (operation !== undefined) {
+      executeRuntimeMutation(operation);
     }
+  };
+  const resetBindings = (evaluatedValue: unknown) => {
+    if (instance === undefined || target === undefined) {
+      return;
+    }
+    const replacements = instance.children.flatMap((child, childIndex) => {
+      if (child.type !== "expression") {
+        return [];
+      }
+      const value =
+        childIndex === target.childIndex
+          ? evaluatedValue
+          : evaluateExpressionWithinScope(child.value, binding.scope);
+      return [
+        {
+          childIndex,
+          expression: child.value,
+          text: String(value),
+        },
+      ];
+    });
+    executeRuntimeMutation({
+      id: "instances.setTextContent",
+      input: {
+        operation: "inlineExpressions",
+        instanceId: instance.id,
+        replacements,
+      },
+    });
+  };
+
+  const expression =
+    child.type === "text" ? JSON.stringify(child.value) : child.value;
+
+  const binding = useBindableControl({
+    boundExpression: child.type === "expression" ? expression : undefined,
+    fallbackExpression: expression,
+  });
+  let displayedValue = computedValue;
+  if (hasMixedContent && child.type === "expression") {
+    try {
+      displayedValue = evaluateExpressionWithinScope(
+        child.value,
+        binding.scope
+      );
+    } catch {
+      displayedValue = undefined;
+    }
+  }
+  const localValue = useDraftValue(String(displayedValue ?? ""), (value) => {
+    if (child.type === "expression") {
+      return;
+    }
+    updateChild("text", value);
   });
 
-  const { scope, aliases } = useStore($selectedInstanceScope);
-  let expression: undefined | string;
-  if (child.type === "text") {
-    expression = JSON.stringify(child.value);
-  }
-  if (child.type === "expression") {
-    expression = child.value;
-  }
-
-  const { overwritable, variant } = useBindingState(
-    child.type === "expression" ? child.value : undefined
-  );
+  const isBindingResetForbidden = useIsBindingResetForbidden();
+  const isResetDisabled =
+    child.type === "expression" && isBindingResetForbidden;
 
   return (
     <VerticalLayout
@@ -86,7 +115,7 @@ export const TextContent = ({
             <>
               Plain text content that can be bound to either a variable or a
               resource value.
-              {overwritable === false && (
+              {binding.bindingState.overwritable === false && (
                 <Flex gap="1">
                   <AlertIcon
                     color={rawTheme.colors.backgroundAlertMain}
@@ -101,12 +130,14 @@ export const TextContent = ({
             </>
           }
           resettable={hasChildren}
+          resetDisabled={isResetDisabled || hasMixedContent}
           onReset={() => {
-            updateWebstudioData((data) => {
-              const instance = data.instances.get(instanceId);
-              if (instance) {
-                instance.children = [];
-              }
+            executeRuntimeMutation({
+              id: "instances.setTextContent",
+              input: {
+                operation: "reset",
+                instanceId,
+              },
             });
           }}
         >
@@ -114,46 +145,36 @@ export const TextContent = ({
         </FieldLabel>
       }
     >
-      <BindingControl>
-        <CodeEditor
-          title={
-            <DialogTitle
-              suffix={
-                <DialogTitleActions>
-                  <DialogMaximize />
-                  <DialogClose />
-                </DialogTitleActions>
-              }
-            >
-              <Text variant="labelsTitleCase">Text Content</Text>
-            </DialogTitle>
-          }
-          size="small"
-          readOnly={overwritable === false}
-          value={localValue.value}
-          onChange={localValue.set}
-          onChangeComplete={localValue.save}
-        />
-        {expression !== undefined && (
-          <BindingPopover
-            scope={scope}
-            aliases={aliases}
-            validate={(value) => {
-              if (value !== undefined && typeof value !== "string") {
-                return `Text Content expects a string value`;
-              }
-            }}
-            variant={variant}
-            value={expression}
-            onChange={(newExpression) => {
-              updateChildren(instanceId, "expression", newExpression);
-            }}
-            onRemove={(evaluatedValue) =>
-              updateChildren(instanceId, "text", String(evaluatedValue))
+      <BindableExpressionControl
+        {...binding}
+        value={localValue.value}
+        validate={(value) => validatePrimitiveValue(value, "Text Content")}
+        onChangeValue={(value) => updateChild("text", value)}
+        onChangeExpression={(value) => updateChild("expression", value)}
+        onRemove={resetBindings}
+        renderControl={({ readOnly }) => (
+          <CodeEditor
+            title={
+              <DialogTitle
+                maximizable
+                suffix={
+                  <DialogTitleActions>
+                    <DialogMaximize />
+                    <DialogClose />
+                  </DialogTitleActions>
+                }
+              >
+                <Text variant="labels">Text content</Text>
+              </DialogTitle>
             }
+            size="small"
+            readOnly={readOnly}
+            value={localValue.value}
+            onChange={localValue.set}
+            onChangeComplete={localValue.save}
           />
         )}
-      </BindingControl>
+      />
     </VerticalLayout>
   );
 };

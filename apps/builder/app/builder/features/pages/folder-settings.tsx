@@ -15,85 +15,36 @@ import {
   rawTheme,
   theme,
 } from "@webstudio-is/design-system";
-import { InfoCircleIcon, TrashIcon, CopyIcon } from "@webstudio-is/icons";
+import { InfoCircleIcon, TrashIcon } from "@webstudio-is/icons";
+import { type Folder, getFolderById } from "@webstudio-is/sdk";
 import {
-  Folder,
-  Pages,
-  ROOT_FOLDER_ID,
-  findParentFolderByChildId,
-} from "@webstudio-is/sdk";
-import { nanoid } from "nanoid";
-import { useCallback, useState, type FocusEventHandler } from "react";
-import slugify from "slugify";
-import { useDebouncedCallback } from "use-debounce";
-import { z } from "zod";
+  folderSettingsDefaultValues,
+  getFolderSettingsValues,
+  getNewFolderSettingsValues,
+  nameToSlug,
+  validateFolderSettings,
+  type FolderSettingsFieldErrors,
+  type FolderSettingsValues,
+} from "@webstudio-is/project-build/runtime";
+import { useState, type FocusEventHandler } from "react";
 import { useIds } from "~/shared/form-utils";
-import { useEffectEvent } from "~/shared/hook-utils/effect-event";
-import { useUnmount } from "~/shared/hook-utils/use-mount";
 import { $pages } from "~/shared/sync/data-stores";
 import { $isDesignMode } from "~/shared/nano-states";
-import { serverSyncStore } from "~/shared/sync/sync-stores";
 import { Form } from "./form";
-import { isSlugAvailable, registerFolderChildMutable } from "./page-utils";
+import { useDraftValue } from "~/builder/shared/use-draft-value";
+import { copyFolder } from "~/shared/copy-paste/copy-paste";
+import { PageItemActionsDropdown } from "./page-item-actions";
+import { executeRuntimeMutation } from "~/shared/instance-utils/data";
 
-const Values = Folder.pick({ name: true, slug: true }).extend({
-  parentFolderId: z.string(),
-});
-
-type Values = z.infer<typeof Values>;
+type Values = FolderSettingsValues;
 
 type FieldName = keyof Values;
 
-type Errors = {
-  [fieldName in FieldName]?: string[];
-};
+type Errors = FolderSettingsFieldErrors;
 
-const fieldDefaultValues = {
-  name: "Untitled",
-  slug: "untitled",
-  parentFolderId: ROOT_FOLDER_ID,
-} satisfies Values;
+const emptyUnsavedValues: Partial<Values> = {};
 
-const fieldNames = Object.keys(fieldDefaultValues) as Array<FieldName>;
-
-const validateValues = (
-  pages: undefined | Pages,
-  values: Values,
-  folderId?: Folder["id"]
-): Errors => {
-  const parsedResult = Values.safeParse(values);
-  const errors: Errors = {};
-  if (parsedResult.success === false) {
-    return parsedResult.error.formErrors.fieldErrors;
-  }
-  if (pages !== undefined && values.slug !== undefined) {
-    if (
-      isSlugAvailable(
-        values.slug,
-        pages.folders,
-        values.parentFolderId,
-        folderId
-      ) === false
-    ) {
-      errors.slug = errors.slug ?? [];
-      errors.slug.push(`Slug "${values.slug}" is already in use`);
-    }
-  }
-  return errors;
-};
-
-const toFormValues = (
-  folderId: Folder["id"],
-  folders: Array<Folder>
-): Values => {
-  const folder = folders.find(({ id }) => id === folderId);
-  const parentFolder = findParentFolderByChildId(folderId, folders);
-  return {
-    name: folder?.name ?? "",
-    slug: folder?.slug ?? "",
-    parentFolderId: parentFolder?.id ?? ROOT_FOLDER_ID,
-  };
-};
+const fieldNames = Object.keys(folderSettingsDefaultValues) as Array<FieldName>;
 
 const autoSelectHandler: FocusEventHandler<HTMLInputElement> = (event) =>
   event.target.select();
@@ -131,7 +82,7 @@ const FormFields = ({
       <ScrollArea>
         <Grid gap={3} css={{ padding: theme.panel.padding }}>
           <Grid gap={1}>
-            <Label htmlFor={fieldIds.name}>Folder Name</Label>
+            <Label htmlFor={fieldIds.name}>Folder name</Label>
             <InputErrorsTooltip errors={errors.name}>
               <InputField
                 tabIndex={1}
@@ -187,14 +138,6 @@ const FormFields = ({
   );
 };
 
-const nameToSlug = (name: string) => {
-  if (name === "") {
-    return "";
-  }
-
-  return slugify(name, { lower: true, strict: true });
-};
-
 export const newFolderId = "new-folder";
 
 export const NewFolderSettings = ({
@@ -209,18 +152,18 @@ export const NewFolderSettings = ({
   const pages = useStore($pages);
   const isDesignMode = useStore($isDesignMode);
 
-  const [values, setValues] = useState<Values>({
-    ...fieldDefaultValues,
-    slug: nameToSlug(fieldDefaultValues.name),
-  });
+  const [values, setValues] = useState<Values>(() =>
+    getNewFolderSettingsValues(pages)
+  );
 
-  const errors = validateValues(pages, values);
+  const errors = validateFolderSettings({ pages, values });
 
   const handleSubmit = () => {
     if (Object.keys(errors).length === 0) {
-      const folderId = nanoid();
-      createFolder(folderId, values);
-      onSuccess(folderId);
+      const folderId = createFolder(values);
+      if (folderId !== undefined) {
+        onSuccess(folderId);
+      }
     }
   };
 
@@ -260,7 +203,7 @@ export const NewFolderSettings = ({
           </DialogTitleActions>
         }
       >
-        New Folder Settings
+        New folder settings
       </DialogTitle>
       <Form onSubmit={handleSubmit}>
         <FormFields
@@ -287,46 +230,25 @@ export const NewFolderSettings = ({
   );
 };
 
-const createFolder = (folderId: Folder["id"], values: Values) => {
-  serverSyncStore.createTransaction([$pages], (pages) => {
-    if (pages === undefined) {
-      return;
-    }
-    pages.folders.push({
-      id: folderId,
+const createFolder = (values: Values) => {
+  const result = executeRuntimeMutation({
+    id: "folders.create",
+    input: {
       name: values.name,
       slug: values.slug,
-      children: [],
-    } satisfies Folder);
-    const parentFolder = pages.folders.find(
-      ({ id }) => id === values.parentFolderId
-    );
-    parentFolder?.children.push(folderId);
+      parentFolderId: values.parentFolderId,
+    },
   });
+  return result?.result.folderId as string | undefined;
 };
 
 const updateFolder = (folderId: Folder["id"], values: Partial<Values>) => {
-  serverSyncStore.createTransaction([$pages], (pages) => {
-    if (pages === undefined) {
-      return;
-    }
-    const folder = pages.folders.find((folder) => folder.id === folderId);
-    if (folder === undefined) {
-      return;
-    }
-    if (values.name !== undefined) {
-      folder.name = values.name;
-    }
-    if (values.slug !== undefined) {
-      folder.slug = values.slug;
-    }
-    if (values.parentFolderId !== undefined) {
-      registerFolderChildMutable(
-        pages.folders,
-        folderId,
-        values.parentFolderId
-      );
-    }
+  executeRuntimeMutation({
+    id: "folders.update",
+    input: {
+      folderId,
+      values,
+    },
   });
 };
 
@@ -342,52 +264,42 @@ export const FolderSettings = ({
   folderId: string;
 }) => {
   const pages = useStore($pages);
-  const folder = pages?.folders.find(({ id }) => id === folderId);
-  const [unsavedValues, setUnsavedValues] = useState<Partial<Values>>({});
+  const folder =
+    pages === undefined ? undefined : getFolderById(pages, folderId);
   const isDesignMode = useStore($isDesignMode);
 
+  let errors: Errors = {};
+  const { value: unsavedValues, set: setUnsavedValues } = useDraftValue<
+    Partial<Values>
+  >(
+    emptyUnsavedValues,
+    (values) => {
+      updateFolder(folderId, values);
+    },
+    {
+      resetOnSave: true,
+      shouldSave: () => Object.keys(errors).length === 0,
+    }
+  );
+
+  const handleChange = <Name extends FieldName>(event: {
+    field: Name;
+    value: Values[Name];
+  }) => {
+    setUnsavedValues((values) => ({
+      ...values,
+      [event.field]: event.value,
+    }));
+  };
+
   const values: Values = {
-    ...(pages ? toFormValues(folderId, pages.folders) : fieldDefaultValues),
+    ...(pages
+      ? getFolderSettingsValues({ folderId, pages })
+      : folderSettingsDefaultValues),
     ...unsavedValues,
   };
 
-  const errors = validateValues(pages, values, folderId);
-
-  const debouncedFn = useEffectEvent(() => {
-    if (
-      Object.keys(unsavedValues).length === 0 ||
-      Object.keys(errors).length !== 0
-    ) {
-      return;
-    }
-
-    updateFolder(folderId, unsavedValues);
-
-    setUnsavedValues({});
-  });
-
-  const handleSubmitDebounced = useDebouncedCallback(debouncedFn, 1000);
-
-  const handleChange = useCallback(
-    <Name extends FieldName>(event: { field: Name; value: Values[Name] }) => {
-      setUnsavedValues((values) => ({
-        ...values,
-        [event.field]: event.value,
-      }));
-      handleSubmitDebounced();
-    },
-    [handleSubmitDebounced]
-  );
-
-  useUnmount(() => {
-    if (
-      Object.keys(unsavedValues).length === 0 ||
-      Object.keys(errors).length !== 0
-    ) {
-      return;
-    }
-    updateFolder(folderId, unsavedValues);
-  });
+  errors = validateFolderSettings({ pages, values, folderId });
 
   if (folder === undefined) {
     return null;
@@ -405,38 +317,30 @@ export const FolderSettings = ({
     }
   };
 
+  const handleCopy = () => {
+    void copyFolder(folderId);
+  };
+
   return (
     <>
       <DialogTitle
         suffix={
           <DialogTitleActions>
-            {isDesignMode && onRequestDelete && (
-              <Tooltip content="Delete folder" side="bottom">
-                <Button
-                  color="ghost"
-                  prefix={<TrashIcon />}
-                  onClick={handleRequestDelete}
-                  aria-label="Delete folder"
-                  tabIndex={2}
-                />
-              </Tooltip>
-            )}
-            {isDesignMode && onDuplicate && (
-              <Tooltip content="Duplicate folder" side="bottom">
-                <Button
-                  color="ghost"
-                  prefix={<CopyIcon />}
-                  onClick={handleDuplicate}
-                  aria-label="Duplicate folder"
-                  tabIndex={2}
-                />
-              </Tooltip>
+            {isDesignMode && (
+              <PageItemActionsDropdown
+                label="Folder actions"
+                actions={{
+                  copy: handleCopy,
+                  duplicate: onDuplicate ? handleDuplicate : undefined,
+                  delete: onRequestDelete ? handleRequestDelete : undefined,
+                }}
+              />
             )}
             <DialogClose />
           </DialogTitleActions>
         }
       >
-        Folder Settings
+        Folder settings
       </DialogTitle>
       <Form onSubmit={onClose}>
         <FormFields

@@ -1,12 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { AssetManager } from "./asset-manager";
+import { StorySection } from "@webstudio-is/design-system";
+import { AssetManager as AssetManagerComponent } from "./asset-manager";
 import {
   ALLOWED_FILE_TYPES,
   IMAGE_EXTENSIONS,
   VIDEO_EXTENSIONS,
 } from "@webstudio-is/sdk";
 import type { Asset, AllowedFileExtension } from "@webstudio-is/sdk";
-import { $assets } from "~/shared/nano-states";
+import { $assets } from "~/shared/sync/data-stores";
 import { useEffect } from "react";
 
 // Create mock assets for every file type
@@ -25,7 +26,7 @@ const createMockAssets = (): Asset[] => {
       type: "file" as const, // Use "file" type to show icons instead of trying to load images
       format: ext,
       size: 1024 * (index + 1),
-      meta: { width: 0, height: 0 },
+      meta: {},
       createdAt: new Date().toISOString(),
       projectId: "mock-project",
       description: `Example ${ext.toUpperCase()} file`,
@@ -37,7 +38,7 @@ const createMockAssets = (): Asset[] => {
 
 export default {
   title: "Asset Manager",
-  component: AssetManager,
+  component: AssetManagerComponent,
 } satisfies Meta;
 
 const AssetManagerStory = () => {
@@ -47,12 +48,14 @@ const AssetManagerStory = () => {
   }, []);
 
   return (
-    <div style={{ width: 400, display: "flex" }}>
-      <AssetManager />
-    </div>
+    <StorySection title="Asset Manager">
+      <div style={{ width: 400, display: "flex" }}>
+        <AssetManagerComponent />
+      </div>
+    </StorySection>
   );
 };
 
-export const AllFileTypes: StoryObj = {
+export const AssetManager: StoryObj = {
   render: () => <AssetManagerStory />,
 };

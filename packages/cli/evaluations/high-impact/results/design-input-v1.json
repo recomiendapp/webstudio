@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 2,
+  "kind": "high-impact-minimal-context-agent-evaluation-result",
+  "fixtureId": "design-input-v1",
+  "outcome": "passed",
+  "cli": "source",
+  "provider": "openai",
+  "model": "gpt-5.4-mini",
+  "commandSha256": "942755cc0025a46d00f539f1720d60cbbb3e26498a6fc835500deda6d7c875c1",
+  "exitCode": 0,
+  "metrics": {
+    "durationMs": 150790,
+    "tokens": {
+      "input": 217420,
+      "cachedInput": 186496,
+      "uncachedInput": 30924,
+      "cacheWriteInput": 0,
+      "output": 8186,
+      "reasoningOutput": 4893,
+      "total": 225606,
+      "cachedInputRate": 0.8578
+    },
+    "mcpCatalog": {
+      "responses": 1,
+      "totalResponseBytes": 53114,
+      "maxResponseBytes": 53114,
+      "latestToolCount": 184,
+      "latestResponseBytes": 53114,
+      "latestInputSchemaBytes": 29971,
+      "latestDescriptionBytes": 4529
+    },
+    "toolCalls": {
+      "total": 9,
+      "succeeded": 9,
+      "failed": 0,
+      "failuresByTool": {},
+      "failuresByCode": {},
+      "issuesByCode": {},
+      "issuesByPath": {},
+      "durationsByTool": {
+        "attach-design-token": {
+          "count": 3,
+          "totalMs": 88,
+          "p95Ms": 42,
+          "maxMs": 42
+        },
+        "create-page": {
+          "count": 1,
+          "totalMs": 31,
+          "p95Ms": 31,
+          "maxMs": 31
+        },
+        "insert-fragment-verified": {
+          "count": 1,
+          "totalMs": 42,
+          "p95Ms": 42,
+          "maxMs": 42
+        },
+        "inspect-design-context": {
+          "count": 1,
+          "totalMs": 40,
+          "p95Ms": 40,
+          "maxMs": 40
+        },
+        "meta.guide": {
+          "count": 1,
+          "totalMs": 75,
+          "p95Ms": 75,
+          "maxMs": 75
+        },
+        "update-styles": {
+          "count": 1,
+          "totalMs": 59,
+          "p95Ms": 59,
+          "maxMs": 59
+        },
+        "verify-page-responsive": {
+          "count": 1,
+          "totalMs": 10165,
+          "p95Ms": 10165,
+          "maxMs": 10165
+        }
+      },
+      "responseBytesByTool": {
+        "attach-design-token": {
+          "count": 3,
+          "totalBytes": 3900,
+          "p95Bytes": 1304,
+          "maxBytes": 1304
+        },
+        "create-page": {
+          "count": 1,
+          "totalBytes": 1342,
+          "p95Bytes": 1342,
+          "maxBytes": 1342
+        },
+        "insert-fragment-verified": {
+          "count": 1,
+          "totalBytes": 2954,
+          "p95Bytes": 2954,
+          "maxBytes": 2954
+        },
+        "inspect-design-context": {
+          "count": 1,
+          "totalBytes": 3082,
+          "p95Bytes": 3082,
+          "maxBytes": 3082
+        },
+        "meta.guide": {
+          "count": 1,
+          "totalBytes": 15130,
+          "p95Bytes": 15130,
+          "maxBytes": 15130
+        },
+        "update-styles": {
+          "count": 1,
+          "totalBytes": 2762,
+          "p95Bytes": 2762,
+          "maxBytes": 2762
+        },
+        "verify-page-responsive": {
+          "count": 1,
+          "totalBytes": 10663,
+          "p95Bytes": 10663,
+          "maxBytes": 10663
+        }
+      },
+      "retries": 0,
+      "focusedReads": 1,
+      "broadReads": 0,
+      "dryRuns": 0,
+      "plannedMutations": 0,
+      "committedMutations": 6,
+      "verifications": 2,
+      "totalDurationMs": 10500,
+      "p50DurationMs": 42,
+      "p95DurationMs": 10165,
+      "totalResponseBytes": 39833,
+      "p50ResponseBytes": 2762,
+      "p95ResponseBytes": 15130,
+      "maxResponseBytes": 15130,
+      "timeToFirstMutationMs": 36333,
+      "timeToFirstVerificationMs": 41878
+    }
+  },
+  "callSequence": [
+    "meta.guide",
+    "inspect-design-context",
+    "create-page",
+    "insert-fragment-verified",
+    "attach-design-token",
+    "attach-design-token",
+    "attach-design-token",
+    "update-styles",
+    "verify-page-responsive"
+  ],
+  "checks": {
+    "guidance": "passed",
+    "privacy": "passed",
+    "expressions": "passed",
+    "boundedReads": "passed",
+    "audit": "passed",
+    "summerPage": "passed",
+    "semanticStructure": "passed",
+    "supportedComponents": "passed",
+    "designSystem": "passed",
+    "breakpointBehavior": "passed",
+    "viewportEvidence": "passed",
+    "usageCaptured": "passed"
+  }
+}

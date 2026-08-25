@@ -1,4 +1,9 @@
-import { StyleValue } from "@webstudio-is/css-engine";
+import {
+  hyphenateProperty,
+  styleValue,
+  type CssProperty,
+  type StyleValue,
+} from "@webstudio-is/css-engine";
 import { z } from "zod";
 
 // Helper for creating union of string literals from array
@@ -57,13 +62,13 @@ export const RANGE_UNITS = [
   "dvmax",
 ] as const;
 
-export const rangeUnitSchema = literalUnion(RANGE_UNITS);
+export const rangeUnit = literalUnion(RANGE_UNITS);
 
-export const rangeUnitValueSchema = z.union([
+export const rangeUnitValue = z.union([
   z.object({
     type: z.literal("unit"),
     value: z.number(),
-    unit: rangeUnitSchema,
+    unit: rangeUnit,
   }),
   z.object({
     type: z.literal("unparsed"),
@@ -76,13 +81,13 @@ export const rangeUnitValueSchema = z.union([
 ]);
 
 export const TIME_UNITS = ["ms", "s"] as const;
-const timeUnitSchema = literalUnion(TIME_UNITS);
+const timeUnit = literalUnion(TIME_UNITS);
 
-export const durationUnitValueSchema = z.union([
+export const durationUnitValue = z.union([
   z.object({
     type: z.literal("unit"),
     value: z.number(),
-    unit: timeUnitSchema,
+    unit: timeUnit,
   }),
   z.object({
     type: z.literal("var"),
@@ -90,11 +95,11 @@ export const durationUnitValueSchema = z.union([
   }),
 ]);
 
-const iterationsUnitValueSchema = z.union([z.number(), z.literal("infinite")]);
+const iterationsUnitValue = z.union([z.number(), z.literal("infinite")]);
 
 // view-timeline-inset
-export const insetUnitValueSchema = z.union([
-  rangeUnitValueSchema,
+export const insetUnitValue = z.union([
+  rangeUnitValue,
   z.object({
     type: z.literal("keyword"),
     value: z.literal("auto"),
@@ -103,16 +108,16 @@ export const insetUnitValueSchema = z.union([
 
 // @todo: Fix Keyframe Styles
 // Can we use CssStyleMap for this? This type ends up not enforcing kebab case like.
-export const keyframeStylesSchema = z.record(StyleValue);
+export const keyframeStyles = z.record(z.string(), styleValue);
 
 // Animation Keyframe
-export const animationKeyframeSchema = z.object({
+export const animationKeyframe = z.object({
   offset: z.number().optional(),
-  styles: keyframeStylesSchema,
+  styles: keyframeStyles,
 });
 
 // Keyframe Effect Options
-export const keyframeEffectOptionsSchema = z.object({
+export const keyframeEffectOptions = z.object({
   easing: z.string().optional(),
   fill: z
     .union([
@@ -122,31 +127,25 @@ export const keyframeEffectOptionsSchema = z.object({
       z.literal("both"),
     ])
     .optional(), // FillMode
-  duration: durationUnitValueSchema.optional(),
-  delay: durationUnitValueSchema.optional(),
-  iterations: iterationsUnitValueSchema.optional(),
+  duration: durationUnitValue.optional(),
+  delay: durationUnitValue.optional(),
+  iterations: iterationsUnitValue.optional(),
 });
 
 // Scroll Named Range
-export const scrollNamedRangeSchema = z.union([
-  z.literal("start"),
-  z.literal("end"),
-]);
+export const scrollNamedRange = z.union([z.literal("start"), z.literal("end")]);
 
 // Scroll Range Value
-export const scrollRangeValueSchema = z.tuple([
-  scrollNamedRangeSchema,
-  rangeUnitValueSchema,
-]);
+export const scrollRangeValue = z.tuple([scrollNamedRange, rangeUnitValue]);
 
 // Scroll Range Options
-export const scrollRangeOptionsSchema = z.object({
-  rangeStart: scrollRangeValueSchema.optional(),
-  rangeEnd: scrollRangeValueSchema.optional(),
+export const scrollRangeOptions = z.object({
+  rangeStart: scrollRangeValue.optional(),
+  rangeEnd: scrollRangeValue.optional(),
 });
 
 // Animation Axis
-export const animationAxisSchema = z.union([
+export const animationAxis = z.union([
   z.literal("block"),
   z.literal("inline"),
   z.literal("x"),
@@ -154,7 +153,7 @@ export const animationAxisSchema = z.union([
 ]);
 
 // View Named Range
-export const viewNamedRangeSchema = z.union([
+export const viewNamedRange = z.union([
   z.literal("contain"),
   z.literal("cover"),
   z.literal("entry"),
@@ -164,15 +163,12 @@ export const viewNamedRangeSchema = z.union([
 ]);
 
 // View Range Value
-export const viewRangeValueSchema = z.tuple([
-  viewNamedRangeSchema,
-  rangeUnitValueSchema,
-]);
+export const viewRangeValue = z.tuple([viewNamedRange, rangeUnitValue]);
 
 // View Range Options
-export const viewRangeOptionsSchema = z.object({
-  rangeStart: viewRangeValueSchema.optional(),
-  rangeEnd: viewRangeValueSchema.optional(),
+export const viewRangeOptions = z.object({
+  rangeStart: viewRangeValue.optional(),
+  rangeEnd: viewRangeValue.optional(),
 });
 
 const baseAnimation = z.object({
@@ -181,75 +177,142 @@ const baseAnimation = z.object({
   enabled: z
     .array(z.tuple([z.string().describe("breakpointId"), z.boolean()]))
     .optional(),
-  keyframes: z.array(animationKeyframeSchema),
+  keyframes: z.array(animationKeyframe),
 });
 
-export const scrollAnimationSchema = baseAnimation.merge(
+export const scrollAnimation = baseAnimation.merge(
   z.object({
-    timing: keyframeEffectOptionsSchema.merge(scrollRangeOptionsSchema),
+    timing: keyframeEffectOptions.merge(scrollRangeOptions),
   })
 );
 
 // Scroll Action
-export const scrollActionSchema = z.object({
+export const scrollAction = z.object({
   type: z.literal("scroll"),
   source: z
     .union([z.literal("closest"), z.literal("nearest"), z.literal("root")])
     .optional(),
-  axis: animationAxisSchema.optional(),
-  animations: z.array(scrollAnimationSchema),
+  axis: animationAxis.optional(),
+  animations: z.array(scrollAnimation),
   isPinned: z.boolean().optional(),
   debug: z.boolean().optional(),
 });
 
-export const viewAnimationSchema = baseAnimation.merge(
+export const viewAnimation = baseAnimation.merge(
   z.object({
-    timing: keyframeEffectOptionsSchema.merge(viewRangeOptionsSchema),
+    timing: keyframeEffectOptions.merge(viewRangeOptions),
   })
 );
 
 // View Action
-export const viewActionSchema = z.object({
+export const viewAction = z.object({
   type: z.literal("view"),
   subject: z.string().optional(),
-  axis: animationAxisSchema.optional(),
-  animations: z.array(viewAnimationSchema),
+  axis: animationAxis.optional(),
+  animations: z.array(viewAnimation),
 
-  insetStart: insetUnitValueSchema.optional(),
+  insetStart: insetUnitValue.optional(),
 
-  insetEnd: insetUnitValueSchema.optional(),
+  insetEnd: insetUnitValue.optional(),
 
   isPinned: z.boolean().optional(),
   debug: z.boolean().optional(),
 });
 
 // Animation Action
-export const animationActionSchema = z.discriminatedUnion("type", [
-  scrollActionSchema,
-  viewActionSchema,
+export const animationAction = z.discriminatedUnion("type", [
+  scrollAction,
+  viewAction,
 ]);
+
+const animationStyleInput = z.union([
+  z
+    .string()
+    .describe(
+      'CSS value such as "translateX(-75%)". The value is parsed into Webstudio style data before it is stored.'
+    ),
+  z
+    .object({ type: z.string() })
+    .passthrough()
+    .superRefine((value, context) => {
+      const result = styleValue.safeParse(value);
+      if (result.success === false) {
+        for (const issue of result.error.issues) {
+          context.addIssue({
+            code: "custom",
+            path: issue.path,
+            message: issue.message,
+          });
+        }
+      }
+    }),
+]);
+
+const animationKeyframeInput = animationKeyframe.extend({
+  styles: z.record(z.string(), animationStyleInput),
+});
+
+const scrollAnimationInput = scrollAnimation.extend({
+  timing: scrollAnimation.shape.timing.optional().default({}),
+  keyframes: z.array(animationKeyframeInput),
+});
+
+const viewAnimationInput = viewAnimation.extend({
+  timing: viewAnimation.shape.timing.optional().default({}),
+  keyframes: z.array(animationKeyframeInput),
+});
+
+export const createAnimationActionInput = ({
+  parseCssValue,
+}: {
+  parseCssValue: (property: CssProperty, value: string) => StyleValue;
+}) =>
+  z
+    .discriminatedUnion("type", [
+      scrollAction.extend({ animations: z.array(scrollAnimationInput) }),
+      viewAction.extend({ animations: z.array(viewAnimationInput) }),
+    ])
+    .transform(
+      (action): AnimationAction =>
+        ({
+          ...action,
+          animations: action.animations.map((animation) => ({
+            ...animation,
+            keyframes: animation.keyframes.map((keyframe) => ({
+              ...keyframe,
+              styles: Object.fromEntries(
+                Object.entries(keyframe.styles).map(([property, value]) => [
+                  property,
+                  typeof value === "string"
+                    ? parseCssValue(hyphenateProperty(property), value)
+                    : value,
+                ])
+              ),
+            })),
+          })),
+        }) as AnimationAction
+    );
 
 // Helper function to check if a value is a valid range unit
 export const isRangeUnit = (
   value: unknown
-): value is z.infer<typeof rangeUnitSchema> =>
-  rangeUnitSchema.safeParse(value).success;
+): value is z.infer<typeof rangeUnit> => rangeUnit.safeParse(value).success;
 
 // Type exports
-export type RangeUnit = z.infer<typeof rangeUnitSchema>;
-export type RangeUnitValue = z.infer<typeof rangeUnitValueSchema>;
-export type DurationUnitValue = z.infer<typeof durationUnitValueSchema>;
-export type IterationsUnitValue = z.infer<typeof iterationsUnitValueSchema>;
-export type TimeUnit = z.infer<typeof timeUnitSchema>;
-export type KeyframeStyles = z.infer<typeof keyframeStylesSchema>;
-export type AnimationKeyframe = z.infer<typeof animationKeyframeSchema>;
-export type ScrollNamedRange = z.infer<typeof scrollNamedRangeSchema>;
-export type ScrollRangeValue = z.infer<typeof scrollRangeValueSchema>;
-export type ViewNamedRange = z.infer<typeof viewNamedRangeSchema>;
-export type ViewRangeValue = z.infer<typeof viewRangeValueSchema>;
-export type AnimationActionScroll = z.infer<typeof scrollActionSchema>;
-export type AnimationActionView = z.infer<typeof viewActionSchema>;
-export type AnimationAction = z.infer<typeof animationActionSchema>;
-export type ScrollAnimation = z.infer<typeof scrollAnimationSchema>;
-export type ViewAnimation = z.infer<typeof viewAnimationSchema>;
-export type InsetUnitValue = z.infer<typeof insetUnitValueSchema>;
+export type RangeUnit = z.infer<typeof rangeUnit>;
+export type RangeUnitValue = z.infer<typeof rangeUnitValue>;
+export type DurationUnitValue = z.infer<typeof durationUnitValue>;
+export type IterationsUnitValue = z.infer<typeof iterationsUnitValue>;
+export type TimeUnit = z.infer<typeof timeUnit>;
+export type KeyframeStyles = z.infer<typeof keyframeStyles>;
+export type AnimationKeyframe = z.infer<typeof animationKeyframe>;
+export type ScrollNamedRange = z.infer<typeof scrollNamedRange>;
+export type ScrollRangeValue = z.infer<typeof scrollRangeValue>;
+export type ViewNamedRange = z.infer<typeof viewNamedRange>;
+export type ViewRangeValue = z.infer<typeof viewRangeValue>;
+export type AnimationActionScroll = z.infer<typeof scrollAction>;
+export type AnimationActionView = z.infer<typeof viewAction>;
+export type AnimationAction = z.infer<typeof animationAction>;
+export type ScrollAnimation = z.infer<typeof scrollAnimation>;
+export type ViewAnimation = z.infer<typeof viewAnimation>;
+export type InsetUnitValue = z.infer<typeof insetUnitValue>;

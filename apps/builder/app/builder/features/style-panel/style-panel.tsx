@@ -23,8 +23,13 @@ import {
 } from "@webstudio-is/design-system";
 import { toValue } from "@webstudio-is/css-engine";
 import { EllipsesIcon } from "@webstudio-is/icons";
-import { $selectedInstanceRenderState } from "~/shared/nano-states";
-import { $selectedInstance } from "~/shared/awareness";
+import {
+  $selectedInstanceRenderState,
+  $selectedStyleSource,
+} from "~/shared/nano-states";
+import { isStyleSourceLocked } from "@webstudio-is/project-build/runtime";
+import { ReadonlyProvider } from "./shared/readonly";
+import { $selectedInstance } from "~/shared/nano-states";
 import { CollapsibleProvider } from "~/builder/shared/collapsible-section";
 import {
   $settings,
@@ -34,11 +39,7 @@ import {
 } from "~/builder/shared/client-settings";
 import { sections } from "./sections";
 import { StyleSourcesSection } from "./style-source-section";
-import {
-  $instanceTags,
-  useComputedStyleDecl,
-  useParentComputedStyleDecl,
-} from "./shared/model";
+import { $instanceTags, useParentComputedStyleDecl } from "./shared/model";
 
 const $selectedInstanceTag = computed(
   [$selectedInstance, $instanceTags],
@@ -84,7 +85,7 @@ export const ModeMenu = () => {
             onFocus={() => setFocusedValue("focus")}
           >
             <Flex justify="between" grow>
-              <Text variant="labelsTitleCase">Focus mode</Text>
+              <Text variant="labels">Focus mode</Text>
               <Kbd value={["alt", "shift", "s"]} />
             </Flex>
           </DropdownMenuRadioItem>
@@ -94,7 +95,7 @@ export const ModeMenu = () => {
             onFocus={() => setFocusedValue("advanced")}
           >
             <Flex justify="between" grow>
-              <Text variant="labelsTitleCase">Advanced mode</Text>
+              <Text variant="labels">Advanced mode</Text>
               <Kbd value={["alt", "shift", "a"]} />
             </Flex>
           </DropdownMenuRadioItem>
@@ -122,8 +123,8 @@ export const ModeMenu = () => {
 export const StylePanel = () => {
   const { stylePanelMode } = useStore($settings);
   const selectedInstanceRenderState = useStore($selectedInstanceRenderState);
+  const readonly = isStyleSourceLocked(useStore($selectedStyleSource));
   const tag = useStore($selectedInstanceTag);
-  const display = toValue(useComputedStyleDecl("display").computedValue);
   const parentDisplay = toValue(
     useParentComputedStyleDecl("display").computedValue
   );
@@ -152,6 +153,10 @@ export const StylePanel = () => {
     if (category === "flexChild" && parentDisplay.includes("flex") === false) {
       continue;
     }
+    // show grid child UI only when parent is grid or inline-grid
+    if (category === "gridChild" && parentDisplay.includes("grid") === false) {
+      continue;
+    }
     // allow customizing list item type only for list and list item
     if (
       category === "listItem" &&
@@ -161,24 +166,14 @@ export const StylePanel = () => {
     ) {
       continue;
     }
-    // non-replaced inline boxes cannot be transformed
-    // https://drafts.csswg.org/css-transforms-1/#css-values
-    if (
-      category === "transforms" &&
-      (display === "inline" ||
-        display === "table-column" ||
-        display === "table-column-group")
-    ) {
-      continue;
-    }
     all.push(<Section key={category} />);
   }
 
   return (
-    <>
+    <ReadonlyProvider value={readonly}>
       <Box css={{ padding: theme.panel.padding }}>
         <Text variant="titles" css={{ paddingBlock: theme.panel.paddingBlock }}>
-          Style Sources
+          Style sources
         </Text>
         <StyleSourcesSection />
       </Box>
@@ -191,6 +186,6 @@ export const StylePanel = () => {
           {all}
         </CollapsibleProvider>
       </ScrollArea>
-    </>
+    </ReadonlyProvider>
   );
 };

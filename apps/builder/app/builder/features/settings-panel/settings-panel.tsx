@@ -14,7 +14,7 @@ import {
 import { UpgradeIcon } from "@webstudio-is/icons";
 import { useStore } from "@nanostores/react";
 import cmsUpgradeBanner from "~/shared/cms-upgrade-banner.svg?url";
-import { $isDesignMode, $userPlanFeatures } from "~/shared/nano-states";
+import { $isDesignMode, $permissions } from "~/shared/nano-states";
 
 export const SettingsPanel = ({
   selectedInstance,
@@ -23,7 +23,7 @@ export const SettingsPanel = ({
   selectedInstance: Instance;
   selectedInstanceKey: string;
 }) => {
-  const { allowDynamicData } = useStore($userPlanFeatures);
+  const { allowDynamicData } = useStore($permissions);
   const isDesignMode = useStore($isDesignMode);
 
   return (
@@ -45,10 +45,11 @@ export const SettingsPanel = ({
             width={rawTheme.spacing[28]}
             style={{ aspectRatio: "4.1" }}
           />
-          <Text variant="regularBold">Upgrade for CMS</Text>
+          <Text variant="regularBold">Upgrade for CMS on custom domains</Text>
           <Text>
             Integrate content from other tools to create blogs, directories, and
-            any other structured content.
+            any other structured content. You can preview CMS on staging without
+            upgrading.
           </Text>
           <Flex align="center" gap={1}>
             <UpgradeIcon />

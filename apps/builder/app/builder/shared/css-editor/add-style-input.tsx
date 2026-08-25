@@ -9,6 +9,7 @@ import {
   ComboboxListboxItem,
   ComboboxRoot,
   ComboboxScrollArea,
+  Flex,
   InputField,
   NestedInputButton,
   Text,
@@ -34,10 +35,17 @@ import {
   deleteProperty,
   setProperty,
 } from "~/builder/features/style-panel/shared/use-style-data";
-import { $availableVariables } from "~/builder/features/style-panel/shared/model";
+import {
+  $availableVariables,
+  $cssVarsMap,
+} from "~/builder/features/style-panel/shared/model";
 import { parseStyleInput } from "./parse-style-input";
 import { validateCssVariableName } from "~/builder/shared/css-variable-utils";
 import { toast } from "@webstudio-is/design-system";
+import {
+  PropertyStatusDescription,
+  PropertyStatusIcon,
+} from "~/builder/features/style-panel/property-status";
 
 type SearchItem = {
   property: string;
@@ -54,7 +62,14 @@ const getNewPropertyDescription = (item: null | SearchItem) => {
   if (item && propertyDescriptions[item.property]) {
     description = propertyDescriptions[item.property];
   }
-  return <Box css={{ width: theme.spacing[28] }}>{description}</Box>;
+  return (
+    <Box css={{ width: theme.spacing[28] }}>
+      <Flex direction="column" gap="2">
+        {description}
+        {item && <PropertyStatusDescription property={item.property} />}
+      </Flex>
+    </Box>
+  );
 };
 
 const getAutocompleteItems = () => {
@@ -122,7 +137,10 @@ const matchOrSuggestToCreate = (search: string, items: Array<SearchItem>) => {
   matched.length = Math.min(matched.length, 100);
 
   if (matched.length === 0) {
-    const parsedStyleMap = parseStyleInput(search);
+    const { styleMap: parsedStyleMap } = parseStyleInput(
+      search,
+      $cssVarsMap.get()
+    );
     const styleMap = mergeStyles(parsedStyleMap);
 
     // When parsedStyles is more than one, user entered a shorthand.
@@ -177,7 +195,6 @@ export const AddStyleInput = forwardRef<
     getItems: getAutocompleteItems,
     itemToString: (item) => item?.label ?? "",
     value: item,
-    defaultHighlightedIndex: 0,
     getItemProps: () => ({ text: "sentence" }),
     match: matchOrSuggestToCreate,
     onChange: (input) => {
@@ -235,9 +252,16 @@ export const AddStyleInput = forwardRef<
       if (property.startsWith("--")) {
         const error = validateCssVariableName(property);
         if (error) {
-          // Show error via toast
-          toast.error(error.message);
-          return;
+          // For duplicate variables, show warning and continue updating the values
+          if (error.type === "duplicate") {
+            toast.warn(
+              `CSS variable "${property}" already exists. Its value will be updated.`
+            );
+          } else {
+            // Show error via toast and block submission
+            toast.error(error.message);
+            return;
+          }
         }
       }
 
@@ -285,6 +309,7 @@ export const AddStyleInput = forwardRef<
         <ComboboxAnchor>
           <InputField
             {...inputProps}
+            aria-label="Add styles"
             onFocus={onFocus}
             onBlur={handleBlur}
             inputRef={forwardedRef}
@@ -301,13 +326,12 @@ export const AddStyleInput = forwardRef<
                   {...combobox.getItemProps({ item, index })}
                   key={index}
                 >
-                  <Text
-                    variant="labelsSentenceCase"
-                    truncate
-                    css={{ maxWidth: "25ch" }}
-                  >
-                    {item.label}
-                  </Text>
+                  <Flex align="center" gap="1">
+                    <Text variant="labels" truncate css={{ maxWidth: "25ch" }}>
+                      {item.label}
+                    </Text>
+                    <PropertyStatusIcon property={item.property} />
+                  </Flex>
                 </ComboboxListboxItem>
               ))}
             </ComboboxScrollArea>

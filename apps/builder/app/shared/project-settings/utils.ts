@@ -1,5 +1,5 @@
 import { rawTheme, theme, type CSS } from "@webstudio-is/design-system";
-import { getPagePath, type Pages } from "@webstudio-is/sdk";
+import { getAllPages, getPagePath, type Pages } from "@webstudio-is/sdk";
 
 export const leftPanelWidth = rawTheme.spacing[26];
 export const rightPanelWidth = rawTheme.spacing[35];
@@ -13,7 +13,10 @@ export const getExistingRoutePaths = (pages?: Pages): Set<string> => {
     return paths;
   }
 
-  for (const page of pages.pages) {
+  for (const page of getAllPages(pages)) {
+    if (page.id === pages.homePageId) {
+      continue;
+    }
     const pagePath = getPagePath(page.id, pages);
     if (pagePath === undefined) {
       continue;

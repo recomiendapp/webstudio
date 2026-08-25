@@ -3,21 +3,21 @@ import { parseStyleInput } from "./parse-style-input";
 
 describe("parseStyleInput", () => {
   test("parses custom property", () => {
-    const result = parseStyleInput("--custom-color");
+    const { styleMap: result } = parseStyleInput("--custom-color", new Map());
     expect(result).toEqual(
       new Map([["--custom-color", { type: "unparsed", value: "" }]])
     );
   });
 
   test("parses longhand property", () => {
-    const result = parseStyleInput("color");
+    const { styleMap: result } = parseStyleInput("color", new Map());
     expect(result).toEqual(
       new Map([["color", { type: "keyword", value: "unset" }]])
     );
   });
 
   test("parses shorthand property", () => {
-    const result = parseStyleInput("margin");
+    const { styleMap: result } = parseStyleInput("margin", new Map());
     expect(result).toEqual(
       new Map([
         ["margin-top", { type: "keyword", value: "unset" }],
@@ -28,34 +28,156 @@ describe("parseStyleInput", () => {
     );
   });
 
+  test("recognizes anchor positioning properties", () => {
+    const declarations = [
+      ["anchor-name", "--trigger"],
+      ["anchor-scope", "--trigger"],
+      ["position-anchor", "--trigger"],
+      ["position-area", "top span-right"],
+      ["position-try-fallbacks", "flip-block"],
+      ["position-try-order", "most-width"],
+      ["position-visibility", "anchors-visible"],
+    ] as const;
+
+    for (const [property, value] of declarations) {
+      const { styleMap } = parseStyleInput(`${property}: ${value}`, new Map());
+      expect(styleMap.has(property), property).toBe(true);
+      expect(styleMap.has(`--${property}`), property).toBe(false);
+    }
+  });
+
+  test("expands the position-try shorthand", () => {
+    const { styleMap } = parseStyleInput(
+      "position-try: most-width --fallback flip-block",
+      new Map()
+    );
+    expect(styleMap).toEqual(
+      new Map([
+        ["position-try-order", { type: "keyword", value: "most-width" }],
+        [
+          "position-try-fallbacks",
+          {
+            type: "tuple",
+            value: [
+              { type: "unparsed", value: "--fallback" },
+              { type: "keyword", value: "flip-block" },
+            ],
+          },
+        ],
+      ])
+    );
+  });
+
   test("trims whitespace", () => {
-    const result = parseStyleInput("  color  ");
+    const { styleMap: result } = parseStyleInput("  color  ", new Map());
     expect(result).toEqual(
       new Map([["color", { type: "keyword", value: "unset" }]])
     );
   });
 
   test("handles unparsable regular property", () => {
-    const result = parseStyleInput("notapro perty");
+    const { styleMap: result } = parseStyleInput("notapro perty", new Map());
     expect(result).toEqual(new Map());
   });
 
   test("converts unknown property to custom property assuming user forgot to add --", () => {
-    const result = parseStyleInput("notaproperty");
+    const { styleMap: result } = parseStyleInput("notaproperty", new Map());
     expect(result).toEqual(
       new Map([["--notaproperty", { type: "unparsed", value: "" }]])
     );
   });
 
   test("parses single property-value pair", () => {
-    const result = parseStyleInput("color: red");
+    const { styleMap: result } = parseStyleInput("color: red", new Map());
     expect(result).toEqual(
       new Map([["color", { type: "keyword", value: "red" }]])
     );
   });
 
+  test("parses transition timing functions", () => {
+    expect(
+      parseStyleInput(
+        "transition-timing-function: cubic-bezier(.36,0,.66,-0.56)",
+        new Map()
+      ).styleMap
+    ).toEqual(
+      new Map([
+        [
+          "transition-timing-function",
+          {
+            type: "layers",
+            value: [
+              {
+                type: "function",
+                name: "cubic-bezier",
+                args: {
+                  type: "layers",
+                  value: [
+                    { type: "unit", value: 0.36, unit: "number" },
+                    { type: "unit", value: 0, unit: "number" },
+                    { type: "unit", value: 0.66, unit: "number" },
+                    { type: "unit", value: -0.56, unit: "number" },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      ])
+    );
+
+    expect(
+      parseStyleInput(
+        "transition-timing-function: steps(4, jump-start)",
+        new Map()
+      ).styleMap
+    ).toEqual(
+      new Map([
+        [
+          "transition-timing-function",
+          {
+            type: "layers",
+            value: [
+              {
+                type: "function",
+                name: "steps",
+                args: {
+                  type: "layers",
+                  value: [
+                    { type: "unit", value: 4, unit: "number" },
+                    { type: "keyword", value: "jump-start" },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      ])
+    );
+
+    expect(
+      parseStyleInput(
+        "transition-timing-function: linear(0 0%, 1 100%)",
+        new Map()
+      ).styleMap
+    ).toEqual(
+      new Map([
+        [
+          "transition-timing-function",
+          {
+            type: "layers",
+            value: [{ type: "unparsed", value: "linear(0 0%,1 100%)" }],
+          },
+        ],
+      ])
+    );
+  });
+
   test("parses multiple property-value pairs", () => {
-    const result = parseStyleInput("color: red; display: block");
+    const { styleMap: result } = parseStyleInput(
+      "color: red; display: block",
+      new Map()
+    );
     expect(result).toEqual(
       new Map([
         ["color", { type: "keyword", value: "red" }],
@@ -65,7 +187,10 @@ describe("parseStyleInput", () => {
   });
 
   test("parses multiple property-value pairs, one is invalid", () => {
-    const result = parseStyleInput("color: red; somethinginvalid: block");
+    const { styleMap: result } = parseStyleInput(
+      "color: red; somethinginvalid: block",
+      new Map()
+    );
     expect(result).toEqual(
       new Map([
         ["color", { type: "keyword", value: "red" }],
@@ -75,23 +200,70 @@ describe("parseStyleInput", () => {
   });
 
   test("parses custom property with value", () => {
-    const result = parseStyleInput("--custom-color: red");
+    const { styleMap: result } = parseStyleInput(
+      "--custom-color: red",
+      new Map()
+    );
     expect(result).toEqual(
       new Map([["--custom-color", { type: "unparsed", value: "red" }]])
     );
   });
 
+  test("does not parse malformed custom property values", () => {
+    const { styleMap: result } = parseStyleInput("--test: #sd'", new Map());
+    expect(result).toEqual(new Map());
+  });
+
   test("handles malformed style block", () => {
-    const result = parseStyleInput("color: red; invalid;");
+    const { styleMap: result } = parseStyleInput(
+      "color: red; invalid;",
+      new Map()
+    );
     expect(result).toEqual(
       new Map([["color", { type: "keyword", value: "red" }]])
     );
   });
 
   test("output property with invalid value", () => {
-    const result = parseStyleInput("rotate: z 0;");
+    const { styleMap: result } = parseStyleInput("rotate: z 0;", new Map());
     expect(result).toEqual(
       new Map([["rotate", { type: "invalid", value: "z 0" }]])
     );
+  });
+
+  test("keeps expanded -webkit-text-stroke longhands as regular properties", () => {
+    const { styleMap: result } = parseStyleInput(
+      "-webkit-text-stroke: 1px red",
+      new Map()
+    );
+    expect(result).toEqual(
+      new Map([
+        [
+          "-webkit-text-stroke-width",
+          {
+            type: "unit",
+            unit: "px",
+            value: 1,
+          },
+        ],
+        [
+          "-webkit-text-stroke-color",
+          {
+            type: "keyword",
+            value: "red",
+          },
+        ],
+      ])
+    );
+  });
+
+  test.each([
+    ["-webkit-text-fill-color", "red"],
+    ["-webkit-text-stroke-color", "blue"],
+    ["-webkit-text-stroke-width", "2px"],
+  ] as const)("recognizes generated WebKit longhand %s", (property, value) => {
+    const { styleMap } = parseStyleInput(`${property}: ${value}`, new Map());
+    expect(styleMap.has(property), property).toBe(true);
+    expect(styleMap.has(`--${property}`), property).toBe(false);
   });
 });

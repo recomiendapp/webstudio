@@ -50,9 +50,13 @@ export const buildBreakpointFromEditorState = (
   const trimmedCondition = conditionValue.trim();
   const hasCondition = trimmedCondition !== "";
 
+  if (trimmedLabel === "") {
+    return;
+  }
+
   const newBreakpoint: Breakpoint = {
     id,
-    label: trimmedLabel || originalBreakpoint?.label || "",
+    label: trimmedLabel,
   };
 
   if (hasCondition) {
@@ -66,7 +70,7 @@ export const buildBreakpointFromEditorState = (
     newBreakpoint.condition = originalBreakpoint.condition;
   } else {
     // Invalid: no condition and no valid width
-    return undefined;
+    return;
   }
 
   return newBreakpoint;

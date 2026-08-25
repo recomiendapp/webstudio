@@ -16,10 +16,10 @@ To install Node.js using NVM, first install NVM by running:
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
 ```
 
-Once NVM is installed, you can install Node.js version 18 by running:
+Once NVM is installed, you can install Node.js version 22 by running:
 
 ```bash
-nvm install 18
+nvm install 22
 ```
 
 Verify your Node.js installation by checking its version:
@@ -68,7 +68,32 @@ Here is the list of independent commands:
 
 ### link
 
-The **`link`** command syncs your local Webstudio project with the project from the cloud. This means that any changes made in the cloud can be synced to the local project, once they are published.
+The **`link`** command stores access to a Webstudio Cloud project. MCP clients use that connection to read and edit the latest Builder build directly; the project does not need to be published or synchronized first.
+
+Shell-capable agents can call MCP tools directly as CLI subcommands immediately after linking. This does not require MCP client configuration or a client restart:
+
+```bash
+webstudio meta.index
+webstudio components.search '{"brief":"button"}'
+webstudio insert-fragment --input-file .temp/insert-fragment.json --dry-run
+```
+
+`.temp/insert-fragment.json`:
+
+```json
+{
+  "parentInstanceId": "<parent-id>",
+  "fragment": "<ws.element ws:tag='section' />"
+}
+```
+
+The explicit equivalent is `webstudio mcp single-op-call <tool> '<json>'`.
+Use `webstudio connect <client>` only when you want persistent native MCP tools
+inside Claude Code, Codex, Cursor, or VS Code. A persistent client may need to
+reconnect after its configuration or cached tool catalog changes.
+
+See the [Webstudio MCP documentation](https://docs.webstudio.is/university/mcp)
+for setup, discovery, editing, verification, and safety guidance.
 
 You can link a project from Webstudio Cloud with the following command:
 
@@ -89,6 +114,8 @@ webstudio sync
 ```
 
 Make sure to publish the project in Webstudio Cloud before running the **`sync`** command in your local Webstudio project.
+
+`sync` is only for downloading a published project export. It is not part of the MCP editing workflow.
 
 ### build
 

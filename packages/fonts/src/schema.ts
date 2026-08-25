@@ -1,32 +1,24 @@
 import { z } from "zod";
 import { FONT_STYLES } from "./constants";
 
-export const FontFormat = z.union([
+const fontStyle = z.enum(FONT_STYLES);
+
+export const fontFormat = z.union([
   z.literal("ttf"),
   z.literal("woff"),
   z.literal("woff2"),
 ]);
-export type FontFormat = z.infer<typeof FontFormat>;
+export type FontFormat = z.infer<typeof fontFormat>;
 
-const AxisName = z.enum([
-  "wght",
-  "wdth",
-  "slnt",
-  "opsz",
-  "ital",
-  "GRAD",
-  "XTRA",
-  "XOPQ",
-  "YOPQ",
-  "YTLC",
-  "YTUC",
-  "YTAS",
-  "YTDE",
-  "YTFI",
-]);
+// OpenType variation axis tags contain four ASCII characters. Registered tags
+// and foundry-defined custom tags use the same identifier format.
+const axisName = z
+  .string()
+  .regex(/^[A-Za-z][A-Za-z0-9]* *$/)
+  .length(4);
 
-const VariationAxes = z.record(
-  AxisName,
+const variationAxes = z.partialRecord(
+  axisName,
   z.object({
     name: z.string(),
     min: z.number(),
@@ -35,21 +27,61 @@ const VariationAxes = z.record(
   })
 );
 
-export type VariationAxes = z.infer<typeof VariationAxes>;
+export type VariationAxes = z.infer<typeof variationAxes>;
 
-export const FontMetaStatic = z.object({
+export const fontMetaStatic = z.object({
   family: z.string(),
-  style: z.enum(FONT_STYLES),
+  style: fontStyle,
   weight: z.number(),
 });
 
-export type FontMetaStatic = z.infer<typeof FontMetaStatic>;
+export type FontMetaStatic = z.infer<typeof fontMetaStatic>;
 
-const FontMetaVariable = z.object({
+export const fontMetaVariable = z.object({
   family: z.string(),
-  variationAxes: VariationAxes,
+  style: fontStyle.default("normal"),
+  variationAxes: variationAxes,
 });
 
-export const FontMeta = z.union([FontMetaStatic, FontMetaVariable]);
+export const fontMeta = z.union([fontMetaStatic, fontMetaVariable]);
 
-export type FontMeta = z.infer<typeof FontMeta>;
+export const fontMetaUpdate = z.union([
+  fontMetaStatic.partial().strict(),
+  z
+    .object({
+      family: fontMetaVariable.shape.family.optional(),
+      style: fontStyle.optional(),
+      variationAxes: fontMetaVariable.shape.variationAxes.optional(),
+    })
+    .strict(),
+]);
+
+export type FontMeta = z.infer<typeof fontMeta>;
+
+export const mergeFontMeta = (
+  current: FontMeta,
+  override: unknown
+): FontMeta | undefined => {
+  const result = fontMetaUpdate.safeParse(override);
+  if (result.success === false) {
+    return;
+  }
+  const { family, style } = result.data;
+  if ("variationAxes" in current) {
+    const variationAxes =
+      "variationAxes" in result.data ? result.data.variationAxes : undefined;
+    return {
+      ...current,
+      ...(family === undefined ? {} : { family }),
+      ...(style === undefined ? {} : { style }),
+      ...(variationAxes === undefined ? {} : { variationAxes }),
+    };
+  }
+  const weight = "weight" in result.data ? result.data.weight : undefined;
+  return {
+    ...current,
+    ...(family === undefined ? {} : { family }),
+    ...(style === undefined ? {} : { style }),
+    ...(weight === undefined ? {} : { weight }),
+  };
+};

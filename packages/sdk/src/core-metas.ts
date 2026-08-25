@@ -15,7 +15,7 @@ import { tags } from "./__generated__/tags";
 export const rootComponent = "ws:root";
 
 const rootMeta: WsComponentMeta = {
-  label: "Global Root",
+  label: "Global root",
   icon: SettingsIcon,
   presetStyle: {
     html,
@@ -43,8 +43,12 @@ export const portalComponent = "Slot";
 
 export const collectionComponent = "ws:collection";
 
+export const collectionDescription =
+  "Use Collection when an array or object from a resource or data variable should render repeated UI. Collection iterates the complete value and renders its child structure once for every item, exposing the current item and key to descendants.";
+
 const collectionMeta: WsComponentMeta = {
   label: "Collection",
+  description: collectionDescription,
   icon: ListViewIcon,
   contentModel: {
     category: "instance",
@@ -56,6 +60,16 @@ const collectionMeta: WsComponentMeta = {
       required: true,
       control: "json",
       type: "json",
+    },
+    item: {
+      required: false,
+      control: "text",
+      type: "string",
+    },
+    itemKey: {
+      required: false,
+      control: "text",
+      type: "string",
     },
   },
 };

@@ -705,6 +705,21 @@ test("expand column-rule", () => {
     ["column-rule-style", "inset"],
     ["column-rule-color", "blue"],
   ]);
+  expect(expandShorthands([["column-rule", "blue dashed"]])).toEqual([
+    ["column-rule-width", "medium"],
+    ["column-rule-style", "dashed"],
+    ["column-rule-color", "blue"],
+  ]);
+  expect(expandShorthands([["column-rule", "inherit"]])).toEqual([
+    ["column-rule-width", "inherit"],
+    ["column-rule-style", "inherit"],
+    ["column-rule-color", "inherit"],
+  ]);
+  expect(expandShorthands([["column-rule", "var(--rule)"]])).toEqual([
+    ["column-rule-width", "var(--rule)"],
+    ["column-rule-style", "var(--rule)"],
+    ["column-rule-color", "var(--rule)"],
+  ]);
 });
 
 test("expand list-style", () => {
@@ -1163,6 +1178,14 @@ test("expand container", () => {
     ["container-name", "my-layout"],
     ["container-type", "size"],
   ]);
+  expect(expandShorthands([["container", "unset"]])).toEqual([
+    ["container-name", "unset"],
+    ["container-type", "unset"],
+  ]);
+  expect(expandShorthands([["container", "var(--container)"]])).toEqual([
+    ["container-name", "var(--container)"],
+    ["container-type", "var(--container)"],
+  ]);
 });
 
 test("expand contain-intrinsic-size", () => {
@@ -1446,16 +1469,63 @@ test("expand overscroll-behavior", () => {
 
 test("expand position-try", () => {
   expect(expandShorthands([["position-try", "none"]])).toEqual([
+    ["position-try-fallbacks", "none"],
     ["position-try-order", "normal"],
-    ["position-try-options", "none"],
   ]);
   expect(expandShorthands([["position-try", "most-width none"]])).toEqual([
+    ["position-try-fallbacks", "none"],
     ["position-try-order", "most-width"],
-    ["position-try-options", "none"],
   ]);
-  expect(expandShorthands([["position-try", "--dashed-ident"]])).toEqual([
+  expect(expandShorthands([["position-try", "--fallback flip-block"]])).toEqual(
+    [
+      ["position-try-fallbacks", "--fallback flip-block"],
+      ["position-try-order", "normal"],
+    ]
+  );
+  expect(expandShorthands([["position-try", "top span-right"]])).toEqual([
+    ["position-try-fallbacks", "top span-right"],
     ["position-try-order", "normal"],
-    ["position-try-options", "--dashed-ident"],
+  ]);
+  expect(expandShorthands([["position-try", "var(--try)"]])).toEqual([
+    ["position-try-fallbacks", "var(--try)"],
+    ["position-try-order", "var(--try)"],
+  ]);
+  expect(expandShorthands([["position-try", "most-width"]])).toEqual([
+    ["position-try-fallbacks", "most-width"],
+    ["position-try-order", "most-width"],
+  ]);
+  expect(expandShorthands([["position-try", "--fallback most-width"]])).toEqual(
+    [
+      ["position-try-fallbacks", "--fallback most-width"],
+      ["position-try-order", "--fallback most-width"],
+    ]
+  );
+  expect(expandShorthands([["position-try", "revert-layer"]])).toEqual([
+    ["position-try-fallbacks", "revert-layer"],
+    ["position-try-order", "revert-layer"],
+  ]);
+});
+
+test("preserve shorthands with incompatible MDN and CSS-tree data", () => {
+  expect(expandShorthands([["interest-delay", "1s 2s"]])).toEqual([
+    ["interest-delay", "1s 2s"],
+  ]);
+});
+
+test.each([
+  [
+    "-ms-content-zoom-snap",
+    "-ms-content-zoom-snap-type",
+    "-ms-content-zoom-snap-points",
+  ],
+  ["-ms-scroll-snap-x", "-ms-scroll-snap-type", "-ms-scroll-snap-points-x"],
+  ["-ms-scroll-snap-y", "-ms-scroll-snap-type", "-ms-scroll-snap-points-y"],
+])("expand syntax-defined function shorthand %s", (shorthand, type, points) => {
+  expect(
+    expandShorthands([[shorthand, "mandatory snapInterval(10%, 20%)"]])
+  ).toEqual([
+    [type, "mandatory"],
+    [points, "snapInterval(10%,20%)"],
   ]);
 });
 
@@ -1542,4 +1612,29 @@ test("does not fail on empty value", () => {
   expect(() => expandShorthands([["background", ""]])).not.toThrow();
   expect(() => expandShorthands([["overscroll-behavior", ""]])).not.toThrow();
   expect(() => expandShorthands([["position-try", ""]])).not.toThrow();
+  expect(() => expandShorthands([["marker", ""]])).not.toThrow();
+});
+
+test("expand marker", () => {
+  expect(expandShorthands([["marker", "none"]])).toEqual([
+    ["marker-start", "none"],
+    ["marker-mid", "none"],
+    ["marker-end", "none"],
+  ]);
+  expect(expandShorthands([["marker", "url(#arrow)"]])).toEqual([
+    ["marker-start", "url(#arrow)"],
+    ["marker-mid", "url(#arrow)"],
+    ["marker-end", "url(#arrow)"],
+  ]);
+});
+
+test("expand -webkit-text-stroke", () => {
+  expect(expandShorthands([["-webkit-text-stroke", "1px red"]])).toEqual([
+    ["-webkit-text-stroke-width", "1px"],
+    ["-webkit-text-stroke-color", "red"],
+  ]);
+  expect(expandShorthands([["-webkit-text-stroke", "red"]])).toEqual([
+    ["-webkit-text-stroke-width", "0"],
+    ["-webkit-text-stroke-color", "red"],
+  ]);
 });

@@ -13,25 +13,24 @@ import {
 import { matchSorter } from "match-sorter";
 import { computed } from "nanostores";
 import { elementComponent, tags } from "@webstudio-is/sdk";
-import {
-  $instances,
-  $props,
-  $registeredComponentMetas,
-} from "~/shared/nano-states";
-import { $selectedInstancePath } from "~/shared/awareness";
+import { $registeredComponentMetas } from "~/shared/nano-states";
+import { $instances } from "~/shared/sync/data-stores";
+import { $props } from "~/shared/sync/data-stores";
+import { $selectedInstancePath, $selectedPage } from "~/shared/nano-states";
 import {
   getInstanceLabel,
   InstanceIcon,
 } from "~/builder/shared/instance-label";
-import { canConvertInstance } from "~/shared/instance-utils";
+import { canConvertInstance } from "@webstudio-is/project-build/runtime";
 import {
   $commandContent,
   $isCommandPanelOpen,
   closeCommandPanel,
   openCommandPanel,
 } from "../command-state";
+import { allowsHtmlMutations } from "../shared/document-utils";
 import { useState } from "react";
-import { convertInstance } from "~/shared/instance-utils";
+import { convertInstance } from "~/shared/instance-utils/mutation";
 
 type ConvertOption = {
   component: string;
@@ -48,13 +47,17 @@ const $convertOptions = computed(
     $instances,
     $props,
     $registeredComponentMetas,
+    $selectedPage,
   ],
-  (isOpen, instancePath, instances, props, metas) => {
+  (isOpen, instancePath, instances, props, metas, selectedPage) => {
     const convertOptions: ConvertOption[] = [];
     if (!isOpen) {
       return convertOptions;
     }
     if (instancePath === undefined || instancePath.length === 1) {
+      return convertOptions;
+    }
+    if (!allowsHtmlMutations(selectedPage)) {
       return convertOptions;
     }
     const [selectedItem] = instancePath;
@@ -67,15 +70,14 @@ const $convertOptions = computed(
       }
 
       if (
-        canConvertInstance(
-          selectedItem.instance.id,
-          selectedItem.instanceSelector,
-          componentName,
-          undefined,
+        canConvertInstance({
+          instanceId: selectedItem.instance.id,
+          instanceSelector: selectedItem.instanceSelector,
+          component: componentName,
           instances,
           props,
-          metas
-        )
+          metas,
+        })
       ) {
         const label = getInstanceLabel({ component: componentName });
         convertOptions.push({
@@ -90,15 +92,15 @@ const $convertOptions = computed(
     // Test all valid HTML tags (for Element component)
     for (const tag of tags) {
       if (
-        canConvertInstance(
-          selectedItem.instance.id,
-          selectedItem.instanceSelector,
-          elementComponent,
+        canConvertInstance({
+          instanceId: selectedItem.instance.id,
+          instanceSelector: selectedItem.instanceSelector,
+          component: elementComponent,
           tag,
           instances,
           props,
-          metas
-        )
+          metas,
+        })
       ) {
         const label = getInstanceLabel({ component: elementComponent, tag });
         convertOptions.push({

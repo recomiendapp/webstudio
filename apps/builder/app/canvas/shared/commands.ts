@@ -2,29 +2,52 @@ import { FORMAT_TEXT_COMMAND } from "lexical";
 import { TOGGLE_LINK_COMMAND } from "@lexical/link";
 import { createCommandsEmitter } from "~/shared/commands-emitter";
 import { getElementByInstanceSelector } from "~/shared/dom-utils";
-import { findAllEditableInstanceSelector } from "~/shared/instance-utils";
+import { findTextEditorTarget } from "@webstudio-is/project-build/runtime";
 import {
-  $instances,
-  $props,
+  $allSelectedInstanceSelectors,
+  $isContentMode,
   $registeredComponentMetas,
+  $propsIndex,
   $selectedInstanceSelector,
   $textEditingInstanceSelector,
   $textToolbar,
+  clearInstanceSelection,
+  selectInstance,
 } from "~/shared/nano-states";
+import { $instances, $props } from "~/shared/sync/data-stores";
 import {
   CLEAR_FORMAT_COMMAND,
   TOGGLE_SPAN_COMMAND,
   getActiveEditor,
   hasSelectionFormat,
 } from "../features/text-editor/toolbar-connector";
-import { selectInstance } from "~/shared/awareness";
-import { isDescendantOrSelf, type InstanceSelector } from "~/shared/tree-utils";
-import { deleteSelectedInstance } from "~/shared/instance-utils";
-import { findClosestRichText } from "~/shared/content-model";
+import { isDescendantOrSelf } from "@webstudio-is/project-build/runtime";
+import { deleteSelectedInstance } from "~/shared/instance-utils/mutation";
+import { getDeletablePageActionTarget } from "~/shared/page-action-target";
+import { isTextEditableInContentMode } from "./content-mode";
+
+const deleteSelectedPageOrInstance = () => {
+  if (getDeletablePageActionTarget() !== undefined) {
+    emitCommand("deleteInstanceBuilder");
+    return;
+  }
+
+  deleteSelectedInstance();
+};
 
 export const { emitCommand, subscribeCommands } = createCommandsEmitter({
   source: "canvas",
-  externalCommands: ["clickCanvas"],
+  externalCommands: [
+    "clickCanvas",
+    "deleteInstanceBuilder",
+    "moveInstanceUp",
+    "moveInstanceDown",
+    "moveInstanceOut",
+    "moveInstanceIntoPreviousSibling",
+    "selectPreviousSibling",
+    "selectNextSibling",
+    "selectSiblingInstances",
+  ],
   commands: [
     {
       name: "deleteInstanceCanvas",
@@ -34,7 +57,7 @@ export const { emitCommand, subscribeCommands } = createCommandsEmitter({
       disableHotkeyOutsideApp: true,
       // We are not disabling "Backspace" or "Delete" on the canvas. This is the main reason we have separate functions: deleteInstanceCanvas and deleteInstanceBuilder.
       disableOnInputLikeControls: false,
-      handler: deleteSelectedInstance,
+      handler: deleteSelectedPageOrInstance,
     },
 
     {
@@ -60,30 +83,27 @@ export const { emitCommand, subscribeCommands } = createCommandsEmitter({
           return;
         }
 
-        let editableInstanceSelector = findClosestRichText({
+        const editableInstanceSelector = findTextEditorTarget({
           instanceSelector: selectedInstanceSelector,
           instances: $instances.get(),
           props: $props.get(),
           metas: $registeredComponentMetas.get(),
+          htmlTagsByInstanceId: $propsIndex.get().htmlTagsByInstanceId,
         });
 
         if (editableInstanceSelector === undefined) {
-          const selectors: InstanceSelector[] = [];
+          $textEditingInstanceSelector.set(undefined);
+          return;
+        }
 
-          findAllEditableInstanceSelector({
-            instanceSelector: selectedInstanceSelector,
+        if (
+          isTextEditableInContentMode({
+            isContentMode: $isContentMode.get(),
+            instanceSelector: editableInstanceSelector,
             instances: $instances.get(),
-            props: $props.get(),
-            metas: $registeredComponentMetas.get(),
-            results: selectors,
-          });
-
-          if (selectors.length === 0) {
-            $textEditingInstanceSelector.set(undefined);
-            return;
-          }
-
-          editableInstanceSelector = selectors[0];
+          }) === false
+        ) {
+          return;
         }
 
         const element = getElementByInstanceSelector(editableInstanceSelector);
@@ -111,7 +131,6 @@ export const { emitCommand, subscribeCommands } = createCommandsEmitter({
       // reset selection for canvas, but not for the builder
       disableHotkeyOutsideApp: true,
       handler: () => {
-        const selectedInstanceSelector = $selectedInstanceSelector.get();
         const textEditingInstanceSelector = $textEditingInstanceSelector.get();
         const textToolbar = $textToolbar.get();
 
@@ -127,9 +146,9 @@ export const { emitCommand, subscribeCommands } = createCommandsEmitter({
           return;
         }
 
-        if (selectedInstanceSelector) {
+        if ($allSelectedInstanceSelectors.get().length > 0) {
           // unselect both instance and style source
-          selectInstance(undefined);
+          clearInstanceSelection();
           return;
         }
       },

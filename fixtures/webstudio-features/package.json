@@ -1,13 +1,15 @@
 {
   "type": "module",
   "scripts": {
-    "typecheck": "tsc",
+    "typecheck": "tsc --noEmit",
     "build": "react-router build",
     "dev": "react-router dev",
     "cli": "NODE_OPTIONS='--conditions=webstudio --import=tsx' webstudio",
-    "fixtures:link": "pnpm cli link --link https://p-cddc1d44-af37-4cb6-a430-d300cf6f932d-dot-${BUILDER_HOST:-main.development.webstudio.is}'?authToken=1cdc6026-dd5b-4624-b89b-9bd45e9bcc3d'",
-    "fixtures:sync": "pnpm cli sync --buildId 043bda3f-0d77-4656-aa9c-652c1a1f272e && pnpm prettier --write ./.webstudio/",
-    "fixtures:build": "pnpm cli build --template react-router --template ./.template && pnpm prettier --write ./app/ ./package.json ./tsconfig.json"
+    "cli:local": "node ../../packages/cli/local.js",
+    "fixtures:link": "pnpm cli:local link --link https://p-cddc1d44-af37-4cb6-a430-d300cf6f932d-dot-${BUILDER_HOST:-main.development.webstudio.is}'?authToken=1cdc6026-dd5b-4624-b89b-9bd45e9bcc3d'",
+    "fixtures:sync": "pnpm cli:local sync --buildId 1b66ee06-8ea5-4420-9a0e-e0d3a67aca32 && oxfmt ./.webstudio/",
+    "fixtures:build": "pnpm cli:local build --template react-router --template ./.template && oxfmt ./app/ ./package.json ./tsconfig.json",
+    "start": "react-router-serve ./build/server/index.js"
   },
   "private": true,
   "sideEffects": false,
@@ -28,17 +30,22 @@
     "react-dom": "18.3.0-canary-14898b6a9-20240318",
     "react-router": "^7.5.3",
     "vite": "^6.3.4",
-    "webstudio": "workspace:*"
+    "webstudio": "workspace:*",
+    "@webstudio-is/wsauth": "workspace:*",
+    "@react-router/serve": "^7.5.3",
+    "@shikijs/langs": "4.4.1",
+    "@shikijs/themes": "4.4.1",
+    "shiki": "4.4.1"
   },
   "devDependencies": {
     "@types/react": "^18.2.70",
     "@types/react-dom": "^18.2.25",
     "fast-glob": "^3.3.2",
-    "typescript": "5.8.2",
+    "typescript": "7.0.2",
     "webstudio": "workspace:*"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.12.0"
   },
   "name": "webstudio-features",
   "version": "0.0.1",
@@ -46,5 +53,12 @@
   "main": "index.js",
   "keywords": [],
   "author": "",
-  "license": "AGPL-3.0-or-later"
+  "license": "AGPL-3.0-or-later",
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": ">=22.12.0",
+      "onFail": "error"
+    }
+  }
 }

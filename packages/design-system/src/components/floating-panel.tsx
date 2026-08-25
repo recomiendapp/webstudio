@@ -25,11 +25,14 @@ const computeFloatingPosition = (
   floating: HTMLElement,
   container: HTMLElement,
   placement: "left-start" | "right-start" | "bottom-within",
+  anchor: "container" | "trigger",
   offsetOptions: OffsetOptions
 ): { x: number; y: number } => {
   const triggerRect = trigger.getBoundingClientRect();
   const floatingRect = floating.getBoundingClientRect();
   const containerRect = container.getBoundingClientRect();
+  const horizontalAnchorRect =
+    anchor === "trigger" ? triggerRect : containerRect;
 
   const mainAxis =
     typeof offsetOptions === "number"
@@ -46,15 +49,13 @@ const computeFloatingPosition = (
   let y = 0;
 
   if (placement === "left-start") {
-    // Position to the left of the container, aligned with the top of trigger
-    x = containerRect.left - floatingRect.width + mainAxis;
+    x = horizontalAnchorRect.left - floatingRect.width + mainAxis;
     // Align panel top with trigger top
     y = triggerRect.top + (alignmentAxis ?? 0);
     // Apply crossAxis offset (moves vertically)
     y += crossAxis;
   } else if (placement === "right-start") {
-    // Position to the right of the container, aligned with the top of trigger
-    x = containerRect.right + mainAxis;
+    x = horizontalAnchorRect.right + mainAxis;
     // Align panel top with trigger top, using trigger's relative position within container
     y = triggerRect.top + (alignmentAxis ?? 0);
     // Apply crossAxis offset (moves vertically)
@@ -117,16 +118,21 @@ type FloatingPanelProps = {
   width?: number;
   height?: number;
   // - bottom-within - below the trigger button, within container bounds
-  // - left-start - on the left side relative to the container, aligned with the top of the trigger button
+  // - left-start - on the left side of the horizontal anchor, aligned with the top of the trigger button
   // - center - center of the screen
   placement?: "left-start" | "right-start" | "center" | "bottom-within";
+  /** Horizontal reference for left/right placement. Vertical placement always follows the trigger. */
+  anchor?: "container" | "trigger";
   offset?: OffsetOptions;
   open?: boolean;
   onOpenChange?: (isOpen: boolean) => void;
+  /** When false, the panel won't close when clicking outside it. */
+  closeOnInteractOutside?: boolean;
 };
 
 const contentStyle = css({
   width: theme.sizes.sidebarWidth,
+  overflow: "auto",
 });
 
 const defaultOffset: OffsetOptions = { mainAxis: 0, crossAxis: 0 };
@@ -141,9 +147,11 @@ export const FloatingPanel = ({
   width,
   height,
   placement = "left-start",
+  anchor = "container",
   offset: offsetProp = defaultOffset,
   open: openProp,
   onOpenChange,
+  closeOnInteractOutside = true,
 }: FloatingPanelProps) => {
   // Support both controlled and uncontrolled modes
   const [internalOpen, setInternalOpen] = useState(false);
@@ -155,6 +163,7 @@ export const FloatingPanel = ({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [position, setPosition] = useState<{ x: number; y: number }>();
   const currentPositionRef = useRef<{ x: number; y: number }>();
+  const maxHeightRef = useRef<number | undefined>();
   const containerRef = useRef<HTMLElement | null>(null);
 
   // Wrap onOpenChange to reset position when panel closes
@@ -162,6 +171,7 @@ export const FloatingPanel = ({
     if (isOpen === false) {
       currentPositionRef.current = undefined;
       setPosition(undefined);
+      maxHeightRef.current = undefined;
       containerRef.current = null;
     }
     // Update internal state if uncontrolled
@@ -176,6 +186,7 @@ export const FloatingPanel = ({
     if (open === false) {
       currentPositionRef.current = undefined;
       setPosition(undefined);
+      maxHeightRef.current = undefined;
       containerRef.current = null;
     }
   }, [open]);
@@ -201,6 +212,11 @@ export const FloatingPanel = ({
       return;
     }
 
+    if (height !== undefined) {
+      maxHeightRef.current = undefined;
+      contentElement.style.removeProperty("max-height");
+    }
+
     const updatePosition = () => {
       if (
         triggerRef.current === null ||
@@ -217,9 +233,19 @@ export const FloatingPanel = ({
           contentElement,
           containerRef.current,
           placement,
+          anchor,
           offsetProp
         );
         currentPositionRef.current = { x, y };
+
+        // Calculate max height based on container bounds
+        const containerRect = containerRef.current.getBoundingClientRect();
+        const availableHeight = containerRect.bottom - y - 10; // 10px padding
+        if (availableHeight > 0 && height === undefined) {
+          maxHeightRef.current = availableHeight;
+          contentElement.style.maxHeight = `${availableHeight}px`;
+        }
+
         setPosition({ x, y });
         return;
       }
@@ -238,6 +264,7 @@ export const FloatingPanel = ({
         contentElement,
         containerRef.current,
         placement,
+        anchor,
         offsetProp
       );
       currentPositionRef.current = { x, y };
@@ -264,7 +291,15 @@ export const FloatingPanel = ({
     return () => {
       resizeObserver.disconnect();
     };
-  }, [contentElement, containerRef, placement, offsetProp, open]);
+  }, [
+    contentElement,
+    containerRef,
+    placement,
+    anchor,
+    offsetProp,
+    open,
+    height,
+  ]);
 
   return (
     <Dialog
@@ -291,7 +326,7 @@ export const FloatingPanel = ({
           // When a dialog is centered, we don't want to close it when clicking outside
           // This allows having inline and left positioned dialogs open at the same time as a centered dialog,
           // while not allowing having multiple non-center positioned dialogs open at the same time.
-          if (placement === "center") {
+          if (placement === "center" || closeOnInteractOutside === false) {
             event.preventDefault();
           }
         }}
@@ -306,6 +341,7 @@ export const FloatingPanel = ({
         {content}
         {typeof title === "string" ? (
           <DialogTitle
+            maximizable={maximizable}
             suffix={
               <DialogTitleActions>
                 {titleSuffix}

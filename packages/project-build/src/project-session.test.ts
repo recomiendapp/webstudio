@@ -1,0 +1,1897 @@
+import { describe, expect, test } from "vitest";
+import { encodeDataVariableId } from "@webstudio-is/sdk";
+import type { BuilderNamespace } from "./contracts/namespaces";
+import type { BuilderPatchTransaction } from "./contracts/patch";
+import {
+  createDefaultProjectSessionCompatibility,
+  createProjectSession,
+  hasProjectSessionPermit,
+  hydrateRestorePointTransaction,
+  projectSessionBusyMessage,
+  redactProjectSessionValue,
+  serializeProjectSessionMeta,
+  serializeRestorePointTransaction,
+} from "./project-session";
+import { runtimeOperationContracts } from "./contracts/builder-runtime";
+import type {
+  ProjectSessionCompatibility,
+  ProjectSessionPersistedSnapshot,
+  ProjectSessionRemoteSnapshot,
+  ProjectSessionStorage,
+  ProjectSessionTransport,
+} from "./project-session";
+import { createBuilderStateFromSnapshot } from "./state/adapters";
+import { createBuilderStateFreshness } from "./state/freshness";
+import { applyBuilderPatchTransactions } from "./state/patch";
+import { build } from "./state/fixtures.test-utils";
+import { parseWebstudioJsxFragment } from "./runtime/jsx";
+import { executeBuilderRuntimeOperation } from "./runtime/registry";
+import type { BuilderRuntimeMutation } from "./runtime/mutation";
+
+const compatibilityVersion = "test-session";
+const compatibility: ProjectSessionCompatibility = {
+  sessionVersion: compatibilityVersion,
+  runtimeContractVersion: "test-runtime-contracts",
+  projectSchemaVersion: "test-project-schema",
+  apiCompatibilityVersion: "test-api",
+};
+
+const createSnapshot = (
+  overrides: Partial<ProjectSessionRemoteSnapshot> = {}
+) => {
+  const state = createBuilderStateFromSnapshot(build);
+  return {
+    projectId: "project-1",
+    buildId: "build-1",
+    version: 1,
+    state,
+    ...overrides,
+  };
+};
+
+const createPersistedSnapshot = (
+  overrides: Partial<ProjectSessionPersistedSnapshot> = {}
+): ProjectSessionPersistedSnapshot => {
+  const snapshot = createSnapshot(overrides);
+  return {
+    ...snapshot,
+    freshness: createBuilderStateFreshness({
+      state: snapshot.state,
+      version: snapshot.version,
+    }),
+    compatibilityVersion,
+    compatibility,
+    revision: "rev-1",
+    ...overrides,
+  };
+};
+
+const createStorage = (
+  initial?: ProjectSessionPersistedSnapshot
+): ProjectSessionStorage & {
+  saved: ProjectSessionPersistedSnapshot[];
+  cleared: boolean;
+} => {
+  let current = initial;
+  let revision = initial?.revision;
+  return {
+    saved: [],
+    cleared: false,
+    async load() {
+      return current;
+    },
+    async save(snapshot, options) {
+      expect(options.expectedRevision).toBe(revision);
+      revision = `rev-${Number(revision?.replace("rev-", "") ?? 0) + 1}`;
+      current = { ...snapshot, revision };
+      this.saved.push(current);
+      return { revision };
+    },
+    async clear() {
+      current = undefined;
+      revision = undefined;
+      this.cleared = true;
+    },
+  };
+};
+
+const createOneTimeConflictingStorage = (
+  initial = createPersistedSnapshot()
+) => {
+  let current = initial;
+  let revision = initial.revision;
+  let saveAttempts = 0;
+  const storage: ProjectSessionStorage = {
+    async load() {
+      return current;
+    },
+    async save(snapshot, options) {
+      saveAttempts += 1;
+      if (saveAttempts === 1) {
+        revision = "rev-concurrent";
+        current = { ...current, revision };
+        throw new Error("Project session snapshot changed on disk.");
+      }
+      expect(options.expectedRevision).toBe(revision);
+      revision = "rev-reconciled";
+      current = { ...snapshot, revision };
+      return { revision };
+    },
+    async clear() {},
+  };
+  return {
+    storage,
+    getCurrent: () => current,
+    getSaveAttempts: () => saveAttempts,
+  };
+};
+
+const createTransport = (
+  remote = createSnapshot()
+): ProjectSessionTransport & {
+  loadedNamespaces: BuilderNamespace[][];
+  commits: BuilderPatchTransaction[][];
+  patchCommits: BuilderPatchTransaction[][];
+  restoreCommits: BuilderPatchTransaction[][];
+  serverOperations: Array<{ operationId: string; input: unknown }>;
+  permissionReads: number;
+} => ({
+  loadedNamespaces: [],
+  commits: [],
+  patchCommits: [],
+  restoreCommits: [],
+  serverOperations: [],
+  permissionReads: 0,
+  async fetchNamespaces(input) {
+    this.loadedNamespaces.push([...input.namespaces]);
+    return remote;
+  },
+  async commitPatch(input) {
+    this.commits.push([...input.transactions]);
+    this.patchCommits.push([...input.transactions]);
+    return { version: input.baseVersion + 1 };
+  },
+  async commitRestorePoint(input) {
+    this.commits.push([...input.transactions]);
+    this.restoreCommits.push([...input.transactions]);
+    return { version: input.baseVersion + 1 };
+  },
+  async getPermissions() {
+    this.permissionReads += 1;
+    return {
+      canView: true,
+      canEdit: true,
+      canBuild: true,
+      canAdmin: false,
+      canUseApi: true,
+    };
+  },
+  async getCompatibility() {
+    return compatibility;
+  },
+  async executeServerOperation<Result>(input: {
+    operationId: string;
+    input: unknown;
+  }) {
+    this.serverOperations.push(input);
+    return { operationId: input.operationId } as unknown as Result;
+  },
+});
+
+const createMutableTransport = (
+  initialRemote: ProjectSessionRemoteSnapshot = createSnapshot()
+) => {
+  let remote = initialRemote;
+  const transport = createTransport(remote);
+  const commit = async (input: Parameters<typeof transport.commitPatch>[0]) => {
+    transport.commits.push([...input.transactions]);
+    const applied = applyBuilderPatchTransactions(
+      remote.state,
+      input.transactions
+    );
+    remote = {
+      ...remote,
+      version: input.baseVersion + 1,
+      state: applied.state,
+    };
+    return { version: remote.version };
+  };
+  transport.commitPatch = async (input) => {
+    transport.patchCommits.push([...input.transactions]);
+    return await commit(input);
+  };
+  transport.commitRestorePoint = async (input) => {
+    transport.restoreCommits.push([...input.transactions]);
+    return await commit(input);
+  };
+  transport.fetchNamespaces = async (input) => {
+    transport.loadedNamespaces.push([...input.namespaces]);
+    return remote;
+  };
+  return transport;
+};
+
+const createSession = ({
+  storage = createStorage(),
+  transport = createTransport(),
+}: {
+  storage?: ProjectSessionStorage;
+  transport?: ProjectSessionTransport;
+} = {}) => {
+  let generatedId = 0;
+  return createProjectSession({
+    projectId: "project-1",
+    storage,
+    transport,
+    compatibilityVersion,
+    runtimeContext: {
+      createId: () => `generated-id-${generatedId++}`,
+    },
+  });
+};
+
+describe("project session", () => {
+  test("round-trips hydrated restore transactions through JSON", () => {
+    const state = createSnapshot().state;
+    state.assetFolders = new Map([
+      [
+        "folder-1",
+        {
+          id: "folder-1",
+          projectId: "project-1",
+          name: "Posts",
+          createdAt: "2026-07-24T00:00:00.000Z",
+        },
+      ],
+    ]);
+    const transaction: BuilderPatchTransaction = {
+      id: "restore",
+      payload: (["pages", "props", "assetFolders"] as const).map(
+        (namespace) => ({
+          namespace,
+          patches: [
+            {
+              op: "replace" as const,
+              path: [],
+              value: state[namespace],
+            },
+          ],
+        })
+      ),
+    };
+
+    const serialized = JSON.parse(
+      JSON.stringify(serializeRestorePointTransaction(transaction))
+    );
+    const hydrated = hydrateRestorePointTransaction(serialized);
+    const getPatchValue = (namespaceIndex: number) => {
+      const patch = hydrated.payload[namespaceIndex]?.patches[0];
+      if (patch?.op !== "replace") {
+        throw new Error("Expected a root replacement patch");
+      }
+      return patch.value;
+    };
+
+    expect(getPatchValue(0)).toMatchObject({
+      pages: expect.any(Map),
+      folders: expect.any(Map),
+    });
+    expect(getPatchValue(1)).toBeInstanceOf(Map);
+    expect(getPatchValue(2)).toEqual(state.assetFolders);
+  });
+
+  test("round-trips an explicitly empty marketplace product", () => {
+    const transaction: BuilderPatchTransaction = {
+      id: "restore",
+      payload: [
+        {
+          namespace: "marketplaceProduct",
+          patches: [{ op: "replace", path: [], value: undefined }],
+        },
+      ],
+    };
+
+    const serialized = JSON.parse(
+      JSON.stringify(serializeRestorePointTransaction(transaction))
+    );
+    expect(serialized.payload[0].patches[0].value).toBeNull();
+
+    const hydrated = hydrateRestorePointTransaction(serialized);
+    expect(hydrated.payload[0]?.patches[0]).toEqual({
+      op: "replace",
+      path: [],
+      value: undefined,
+    });
+  });
+
+  test("rejects malformed serialized restore namespace values", () => {
+    expect(() =>
+      hydrateRestorePointTransaction({
+        id: "restore",
+        payload: [
+          {
+            namespace: "instances",
+            patches: [
+              {
+                op: "replace",
+                path: [],
+                value: [["broken", { id: "broken" }]],
+              },
+            ],
+          },
+        ],
+      })
+    ).toThrow();
+  });
+
+  test("derives default compatibility from the full runtime contract shape", () => {
+    const compatibility =
+      createDefaultProjectSessionCompatibility("test-session");
+    const runtimeIdsVersion = `runtime-contracts:${runtimeOperationContracts
+      .map((contract) => contract.id)
+      .join(",")}`;
+
+    expect(compatibility.runtimeContractVersion).toMatch(
+      /^runtime-contracts:[a-z0-9]+$/
+    );
+    expect(compatibility.runtimeContractVersion).not.toBe(runtimeIdsVersion);
+    expect(compatibility.runtimeContractVersion).toBe(
+      createDefaultProjectSessionCompatibility("test-session")
+        .runtimeContractVersion
+    );
+  });
+
+  test("initializes from compatible persisted state and serves reads locally", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.read("pages.list", { projectId: "project-1" });
+
+    expect(result.source).toBe("local");
+    expect(result.state.committed).toBe(false);
+    expect(result.namespaces.read).toEqual(["pages"]);
+    expect(transport.loadedNamespaces).toEqual([]);
+  });
+
+  test("clears persisted state when compatibility metadata changed", async () => {
+    const storage = createStorage(
+      createPersistedSnapshot({
+        compatibility: {
+          ...compatibility,
+          runtimeContractVersion: "old-runtime-contracts",
+        },
+      })
+    );
+    const session = createSession({ storage });
+
+    const result = await session.initialize();
+
+    expect(result.result).toEqual({ loaded: false });
+    expect(storage.cleared).toBe(true);
+  });
+
+  test("identifies session control operations in their envelopes", async () => {
+    const session = createSession({
+      storage: createStorage(),
+      transport: createTransport(),
+    });
+
+    await expect(session.initialize()).resolves.toMatchObject({
+      operationId: "project-session.status",
+    });
+    await expect(session.refresh(["pages"])).resolves.toMatchObject({
+      operationId: "project-session.refresh",
+    });
+    await expect(session.reset()).resolves.toMatchObject({
+      operationId: "project-session.reset",
+    });
+  });
+
+  test("refreshes missing namespaces from remote and persists atomically", async () => {
+    const storage = createStorage();
+    const transport = createTransport();
+    const session = createSession({ storage, transport });
+
+    const result = await session.read("pages.list", { projectId: "project-1" });
+
+    expect(result.source).toBe("local");
+    expect(transport.loadedNamespaces).toEqual([["pages"]]);
+    expect(storage.saved).toHaveLength(1);
+  });
+
+  test("persists project settings from a cold session across refresh", async () => {
+    const storage = createStorage();
+    const transport = createMutableTransport();
+    const session = createSession({ storage, transport });
+
+    const update = await session.mutate("projectSettings.update", {
+      meta: { siteName: "Persisted site" },
+    });
+    expect(update.result).toEqual({ updated: true });
+    expect(update.state.committed).toBe(true);
+    expect(update.namespaces).toMatchObject({
+      read: ["projectSettings"],
+      write: ["projectSettings"],
+      invalidated: ["projectSettings"],
+    });
+
+    await session.refresh(["projectSettings"]);
+    const settings = await session.read("projectSettings.get", {});
+
+    expect(settings.result).toMatchObject({
+      meta: { siteName: "Persisted site" },
+    });
+    expect(transport.commits).toHaveLength(1);
+    expect(transport.patchCommits).toHaveLength(1);
+    expect(transport.restoreCommits).toHaveLength(0);
+    expect(transport.loadedNamespaces).toEqual([
+      ["projectSettings"],
+      ["projectSettings"],
+      ["pages"],
+    ]);
+  });
+
+  test("creates marketplace metadata from an unconfigured session", async () => {
+    const remote = createSnapshot();
+    remote.state.marketplaceProduct = undefined;
+    const transport = createMutableTransport(remote);
+    const session = createSession({ storage: createStorage(), transport });
+    const marketplaceProduct = {
+      category: "pageTemplates" as const,
+      name: "Acme Template",
+      thumbnailAssetId: "asset-id",
+      author: "Acme Studio",
+      email: "hello@example.com",
+      website: "https://example.com",
+      issues: "",
+      description: "Reusable template project for Acme landing pages.",
+    };
+
+    const update = await session.mutate(
+      "projectSettings.updateMarketplaceProduct",
+      marketplaceProduct
+    );
+    expect(update.state.committed).toBe(true);
+
+    await session.refresh(["marketplaceProduct"]);
+    const product = await session.read(
+      "projectSettings.getMarketplaceProduct",
+      {}
+    );
+    expect(product.result).toEqual({ marketplaceProduct });
+  });
+
+  test("loads configured marketplace metadata in a cold session", async () => {
+    const remote = createSnapshot();
+    const transport = createTransport(remote);
+    const session = createSession({ storage: createStorage(), transport });
+
+    const product = await session.read(
+      "projectSettings.getMarketplaceProduct",
+      {}
+    );
+
+    expect(product.result).toEqual({
+      marketplaceProduct: remote.state.marketplaceProduct,
+    });
+    expect(transport.loadedNamespaces).toEqual([["marketplaceProduct"]]);
+  });
+
+  test("duplicates a page from a cold session with assets hydrated", async () => {
+    const remote = createSnapshot({
+      state: createBuilderStateFromSnapshot({
+        ...build,
+        assets: [
+          [
+            "asset-hero",
+            {
+              id: "asset-hero",
+              projectId: "project-1",
+              name: "hero.png",
+              type: "image",
+              size: 128,
+              format: "png",
+              createdAt: "2026-01-01T00:00:00.000Z",
+              description: "Product hero",
+              meta: { width: 1200, height: 800 },
+            },
+          ],
+        ],
+        instances: [
+          [
+            "instance-root",
+            {
+              type: "instance",
+              id: "instance-root",
+              component: "Body",
+              children: [{ type: "id", value: "instance-image" }],
+            },
+          ],
+          [
+            "instance-image",
+            {
+              type: "instance",
+              id: "instance-image",
+              component: "Image",
+              children: [],
+            },
+          ],
+        ],
+        props: [
+          ...build.props,
+          [
+            "prop-image-src",
+            {
+              id: "prop-image-src",
+              instanceId: "instance-image",
+              name: "src",
+              type: "asset",
+              value: "asset-hero",
+            },
+          ],
+        ],
+      }),
+    });
+    const transport = createTransport(remote);
+    const session = createSession({ transport });
+
+    const result = await session.mutate(
+      "pages.duplicate",
+      {
+        projectId: "project-1",
+        pageId: "page-home",
+        name: "Home copy",
+        path: "/home-copy",
+      },
+      { dryRun: true }
+    );
+
+    expect(result.state.committed).toBe(false);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: "DRY_RUN" }),
+    ]);
+    expect(transport.loadedNamespaces[0]).toEqual(
+      expect.arrayContaining(["pages", "assets", "instances", "props"])
+    );
+    expect(result.transaction).toBeDefined();
+    const plannedState = applyBuilderPatchTransactions(remote.state, [
+      result.transaction!,
+    ]).state;
+    const duplicatedPage = Array.from(
+      plannedState.pages?.pages.values() ?? []
+    ).find((page) => page.name === "Home copy");
+    expect(duplicatedPage).toBeDefined();
+    const duplicateRoot = plannedState.instances?.get(
+      duplicatedPage!.rootInstanceId
+    );
+    const duplicateImageId = duplicateRoot?.children.find(
+      (child) => child.type === "id"
+    )?.value;
+    expect(duplicateImageId).toBeDefined();
+    const duplicateAssetProp = Array.from(
+      plannedState.props?.values() ?? []
+    ).find(
+      (prop) => prop.instanceId === duplicateImageId && prop.name === "src"
+    );
+    expect(duplicateAssetProp).toMatchObject({
+      type: "asset",
+      value: "asset-hero",
+    });
+    expect(plannedState.assets?.has("asset-hero")).toBe(true);
+  });
+
+  test("retries namespace refresh once when local snapshot changes on disk", async () => {
+    const remote = createSnapshot();
+    let current: ProjectSessionPersistedSnapshot | undefined;
+    let revision: string | undefined;
+    let saveAttempts = 0;
+    const storage: ProjectSessionStorage & {
+      saved: ProjectSessionPersistedSnapshot[];
+    } = {
+      saved: [],
+      async load() {
+        return current;
+      },
+      async save(snapshot, options) {
+        saveAttempts += 1;
+        if (saveAttempts === 1) {
+          current = createPersistedSnapshot({
+            ...remote,
+            revision: "rev-concurrent",
+          });
+          revision = current.revision;
+          throw new Error("Project session snapshot changed on disk.");
+        }
+        expect(options.expectedRevision).toBe(revision);
+        revision = "rev-retry";
+        current = { ...snapshot, revision };
+        this.saved.push(current);
+        return { revision };
+      },
+      async clear() {
+        current = undefined;
+        revision = undefined;
+      },
+    };
+    const transport = createTransport(remote);
+    const session = createSession({ storage, transport });
+
+    const result = await session.read("breakpoints.list", {});
+
+    expect(result.source).toBe("local");
+    expect(result.diagnostics).toEqual([]);
+    expect(saveAttempts).toBe(2);
+    expect(transport.loadedNamespaces).toEqual([
+      ["breakpoints"],
+      ["breakpoints"],
+    ]);
+    expect(storage.saved).toHaveLength(1);
+  });
+
+  test("describes commit status as not applicable for read operations", async () => {
+    const session = createSession({
+      storage: createStorage(createPersistedSnapshot()),
+    });
+    const result = await session.read("breakpoints.list", {});
+
+    expect(serializeProjectSessionMeta(result)).toMatchObject({
+      source: "local",
+      commitStatus: "not-applicable",
+      committed: false,
+    });
+
+    const serverResult = await session.executeServerOperation(
+      { id: "auth.me", method: "query" },
+      {}
+    );
+    expect(serializeProjectSessionMeta(serverResult)).toMatchObject({
+      source: "server",
+      commitStatus: "not-applicable",
+      committed: false,
+    });
+  });
+
+  test("reports persistent session write conflicts as transient busy errors", async () => {
+    const storage: ProjectSessionStorage = {
+      async load() {
+        return createPersistedSnapshot({ revision: "rev-concurrent" });
+      },
+      async save() {
+        throw new Error("Project session snapshot changed on disk.");
+      },
+      async clear() {},
+    };
+    const session = createSession({ storage });
+
+    await session.initialize();
+    await expect(session.markStale(["breakpoints"])).rejects.toMatchObject({
+      name: "PROJECT_SESSION_BUSY",
+      code: "PROJECT_SESSION_BUSY",
+      message: projectSessionBusyMessage,
+    });
+  });
+
+  test("does not update local state during dry-run mutations", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate(
+      "folders.create",
+      { name: "Draft", slug: "draft" },
+      { dryRun: true }
+    );
+
+    expect(result.source).toBe("dry-run");
+    expect(result.state.committed).toBe(false);
+    expect(result.transaction?.payload).toHaveLength(1);
+    expect(serializeProjectSessionMeta(result)).toMatchObject({
+      diagnosticCount: 1,
+      commitStatus: "planned",
+      committed: false,
+      transaction: result.transaction,
+      diagnostics: [
+        {
+          level: "info",
+          code: "DRY_RUN",
+          message: "Mutation was planned locally and was not committed.",
+        },
+      ],
+    });
+    const compact = serializeProjectSessionMeta(result);
+    const verbose = serializeProjectSessionMeta(result, { verbose: true });
+    expect(compact).not.toHaveProperty("namespaces");
+    expect(verbose).toMatchObject({
+      ...compact,
+      namespaces: result.namespaces,
+      freshness: result.state.freshness,
+    });
+    expect(JSON.stringify(compact).length).toBeLessThan(
+      JSON.stringify(verbose).length * 0.75
+    );
+
+    const withSecretDiagnostic = {
+      ...result,
+      diagnostics: [
+        ...result.diagnostics,
+        {
+          level: "warning" as const,
+          code: "TEST_DIAGNOSTIC",
+          message:
+            "A credential was rejected at https://example.com/?authToken=also-never-print-this.",
+          details: { authToken: "never-print-this" },
+        },
+      ],
+    };
+    expect(
+      JSON.stringify(serializeProjectSessionMeta(withSecretDiagnostic))
+    ).not.toContain("never-print-this");
+    const redactedVerbose = JSON.stringify(
+      serializeProjectSessionMeta(withSecretDiagnostic, { verbose: true })
+    );
+    expect(redactedVerbose).not.toContain("never-print-this");
+    expect(redactedVerbose).not.toContain("also-never-print-this");
+    expect(redactedVerbose).toContain("[redacted]");
+    expect(transport.commits).toEqual([]);
+    expect(storage.saved).toHaveLength(0);
+  });
+
+  test("plans and commits one semantic Collection transaction that survives refresh", async () => {
+    let remote = createSnapshot();
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport(remote);
+    transport.fetchNamespaces = async (input) => {
+      transport.loadedNamespaces.push([...input.namespaces]);
+      return remote;
+    };
+    let serverGeneratedId = 0;
+    transport.executeServerOperation = async <Result>(input: {
+      operationId: string;
+      input: unknown;
+    }) => {
+      transport.serverOperations.push(input);
+      const mutation =
+        await executeBuilderRuntimeOperation<BuilderRuntimeMutation>({
+          id: input.operationId,
+          state: remote.state,
+          input: input.input,
+          context: {
+            projectVersion: remote.version,
+            createId: () => `server-generated-id-${serverGeneratedId++}`,
+          },
+        });
+      const transaction: BuilderPatchTransaction = {
+        id: `server-transaction-${serverGeneratedId++}`,
+        payload: mutation.payload,
+      };
+      remote = {
+        ...remote,
+        version: remote.version + 1,
+        state: applyBuilderPatchTransactions(remote.state, [transaction]).state,
+      };
+      return mutation.result as Result;
+    };
+    const session = createSession({ storage, transport });
+    const input = {
+      parentInstanceId: "instance-root",
+      data: {
+        type: "json" as const,
+        value: [{ title: "First" }, { title: "Second" }],
+      },
+      itemFragment: await parseWebstudioJsxFragment(
+        '<ws.element ws:tag="article">{expression`collectionItem.title`}</ws.element>'
+      ),
+    };
+
+    await session.initialize();
+    const planned = await session.mutate("instances.insertCollection", input, {
+      dryRun: true,
+    });
+    expect(planned.diagnostics).toEqual([
+      expect.objectContaining({ code: "DRY_RUN" }),
+    ]);
+    expect(planned.source).toBe("dry-run");
+    expect(planned.state.committed).toBe(false);
+    expect(
+      planned.transaction?.payload.map((change) => change.namespace)
+    ).toEqual(expect.arrayContaining(["instances", "props", "dataSources"]));
+    expect(transport.commits).toHaveLength(0);
+
+    const committed = await session.mutate("instances.insertCollection", input);
+    expect(committed.state.committed).toBe(true);
+    expect(transport.serverOperations).toHaveLength(1);
+    const result = committed.result as { collectionInstanceId: string };
+    expect(
+      remote.state.instances?.get(result.collectionInstanceId)
+    ).toMatchObject({
+      component: "ws:collection",
+    });
+
+    await session.refresh(["instances", "props", "dataSources"]);
+    expect(
+      storage.saved.at(-1)?.state.instances?.get(result.collectionInstanceId)
+    ).toMatchObject({ component: "ws:collection" });
+  });
+
+  test("plans and commits one runtime UI integration that survives refresh", async () => {
+    let remote = createSnapshot();
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport(remote);
+    transport.fetchNamespaces = async (input) => {
+      transport.loadedNamespaces.push([...input.namespaces]);
+      return remote;
+    };
+    let serverGeneratedId = 0;
+    transport.executeServerOperation = async <Result>(input: {
+      operationId: string;
+      input: unknown;
+    }) => {
+      transport.serverOperations.push(input);
+      const mutation =
+        await executeBuilderRuntimeOperation<BuilderRuntimeMutation>({
+          id: input.operationId,
+          state: remote.state,
+          input: input.input,
+          context: {
+            projectVersion: remote.version,
+            createId: () => `runtime-ui-id-${serverGeneratedId++}`,
+          },
+        });
+      const transaction: BuilderPatchTransaction = {
+        id: `runtime-ui-transaction-${serverGeneratedId++}`,
+        payload: mutation.payload,
+      };
+      remote = {
+        ...remote,
+        version: remote.version + 1,
+        state: applyBuilderPatchTransactions(remote.state, [transaction]).state,
+      };
+      return mutation.result as Result;
+    };
+    const session = createSession({ storage, transport });
+    const input = {
+      parentInstanceId: "instance-root",
+      variables: [
+        {
+          name: "ResultsLabel",
+          value: { type: "string" as const, value: "Results" },
+        },
+      ],
+      resources: [
+        {
+          resource: {
+            name: "Results",
+            method: "get" as const,
+            url: "https://api.example.com/results",
+            headers: [],
+          },
+          dataSourceName: "Results",
+          exposeAsDataSource: true,
+        },
+      ],
+      structure: {
+        type: "collection" as const,
+        data: { type: "expression" as const, value: "Results.data" },
+        itemFragment: await parseWebstudioJsxFragment(
+          '<ws.element ws:tag="article">{expression`collectionItem.title`}</ws.element>'
+        ),
+      },
+      bindings: [],
+      retainedBehavior: [],
+      unsupportedConversions: [],
+    };
+
+    await session.initialize();
+    const planned = await session.mutate("runtimeUi.integrate", input, {
+      dryRun: true,
+    });
+    expect(planned.source).toBe("dry-run");
+    expect(planned.state.committed).toBe(false);
+    expect(planned.transaction?.payload).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ namespace: "resources" }),
+        expect.objectContaining({ namespace: "instances" }),
+      ])
+    );
+    expect(transport.commits).toHaveLength(0);
+
+    const committed = await session.mutate("runtimeUi.integrate", input);
+    expect(committed.state.committed).toBe(true);
+    const result = committed.result as {
+      created: { rootInstanceIds: string[] };
+      editableStructure: { usesCollection: boolean };
+    };
+    expect(result.editableStructure.usesCollection).toBe(true);
+    const collectionId = result.created.rootInstanceIds[0];
+    expect(remote.state.instances?.get(collectionId)).toMatchObject({
+      component: "ws:collection",
+    });
+
+    await session.refresh(["instances", "props", "dataSources", "resources"]);
+    expect(
+      storage.saved.at(-1)?.state.instances?.get(collectionId)
+    ).toMatchObject({ component: "ws:collection" });
+  });
+
+  test("commits remotely before applying mutation locally", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("pages.update", {
+      pageId: "page-home",
+      values: { name: "New Home" },
+    });
+
+    expect(result.source).toBe("local");
+    expect(result.state.committed).toBe(true);
+    expect(result.version).toBe(2);
+    expect(transport.commits).toHaveLength(1);
+    expect(transport.serverOperations).toEqual([]);
+    expect(storage.saved.at(-1)?.version).toBe(2);
+    expect(
+      storage.saved.at(-1)?.state.pages?.pages.get("page-home")?.name
+    ).toBe("New Home");
+    expect(storage.saved.at(-1)?.freshness.pages).toMatchObject({
+      status: "invalidated",
+      version: 2,
+      source: "local",
+      loadedAt: expect.any(String),
+      invalidatedBy: "pages.update",
+    });
+    expect(serializeProjectSessionMeta(result)).toMatchObject({
+      source: "local",
+      commitStatus: "committed",
+      committed: true,
+    });
+    expect(storage.saved.at(-1)?.freshness.instances).toEqual({
+      status: "fresh",
+      version: 1,
+    });
+  });
+
+  test("reports a mutation as committed after reconciling a local snapshot race", async () => {
+    const { storage, getCurrent } = createOneTimeConflictingStorage();
+    const transport = createMutableTransport();
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("pages.update", {
+      pageId: "page-home",
+      values: { name: "New Home" },
+    });
+
+    expect(transport.commits).toHaveLength(1);
+    expect(result.state.committed).toBe(true);
+    expect(result.result).toMatchObject({ pageId: "page-home" });
+    expect(result.version).toBe(2);
+    expect(result.diagnostics).toEqual([
+      {
+        level: "info",
+        code: "COMMITTED_SESSION_RECONCILED",
+        message:
+          "The mutation committed and the local project session was refreshed after its snapshot could not be saved.",
+      },
+    ]);
+    expect(getCurrent().version).toBe(2);
+    expect(getCurrent().state.pages?.pages.get("page-home")?.name).toBe(
+      "New Home"
+    );
+  });
+
+  test("does not report an applied mutation as uncommitted when reconciliation fails", async () => {
+    const current = createPersistedSnapshot();
+    let saveAttempts = 0;
+    const storage: ProjectSessionStorage = {
+      async load() {
+        return current;
+      },
+      async save() {
+        saveAttempts += 1;
+        throw new Error("Project session snapshot changed on disk.");
+      },
+      async clear() {},
+    };
+    const transport = createTransport();
+    transport.fetchNamespaces = async () => {
+      throw new Error("Remote refresh failed.");
+    };
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("pages.update", {
+      pageId: "page-home",
+      values: { name: "New Home" },
+    });
+
+    expect(transport.commits).toHaveLength(1);
+    expect(saveAttempts).toBe(1);
+    expect(result.state.committed).toBe(true);
+    expect(result.result).toMatchObject({ pageId: "page-home" });
+    expect(result.state.freshness.pages?.status).toBe("stale");
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        level: "warning",
+        code: "COMMITTED_SESSION_RECONCILE_FAILED",
+        message:
+          "The mutation committed remotely, but the local project session could not be refreshed. Do not retry the mutation; refresh the session before the next change.",
+      }),
+    ]);
+  });
+
+  test("runs generated-record create mutations on the server", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("folders.create", {
+      name: "New",
+      slug: "new",
+    });
+
+    expect(result.source).toBe("server");
+    expect(result.state.committed).toBe(true);
+    expect(transport.commits).toEqual([]);
+    expect(transport.serverOperations).toEqual([
+      {
+        operationId: "folders.create",
+        input: { name: "New", slug: "new" },
+      },
+    ]);
+    expect(transport.loadedNamespaces.at(-1)).toEqual(["pages"]);
+  });
+
+  test("does not report a committed server mutation as busy after a local snapshot race", async () => {
+    const { storage, getSaveAttempts } = createOneTimeConflictingStorage();
+    const transport = createTransport();
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("folders.create", {
+      name: "New",
+      slug: "new",
+    });
+
+    expect(result.source).toBe("server");
+    expect(result.state.committed).toBe(true);
+    expect(getSaveAttempts()).toBe(2);
+    expect(transport.serverOperations).toEqual([
+      {
+        operationId: "folders.create",
+        input: { name: "New", slug: "new" },
+      },
+    ]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  test("commits generated-record field mutations locally", async () => {
+    const variableId = "variable-title";
+    const state = createBuilderStateFromSnapshot(build);
+    const homePage = state.pages?.pages.get("page-home");
+    if (homePage === undefined || state.dataSources === undefined) {
+      throw new Error("Expected project session test fixture state.");
+    }
+    homePage.title = encodeDataVariableId(variableId);
+    state.dataSources.set(variableId, {
+      id: variableId,
+      scopeInstanceId: "instance-root",
+      name: "pageTitle",
+      type: "variable",
+      value: { type: "string", value: "Home" },
+    });
+    const storage = createStorage(createPersistedSnapshot({ state }));
+    const transport = createTransport();
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("variables.delete", {
+      dataSourceId: variableId,
+    });
+
+    expect(result.source).toBe("local");
+    expect(result.state.committed).toBe(true);
+    expect(transport.commits).toHaveLength(1);
+    expect(transport.serverOperations).toEqual([]);
+    expect(result.transaction?.payload).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          namespace: "pages",
+          patches: expect.arrayContaining([
+            {
+              op: "replace",
+              path: ["pages", "page-home", "title"],
+              value: "pageTitle",
+            },
+          ]),
+        }),
+        expect.objectContaining({
+          namespace: "dataSources",
+          patches: [{ op: "remove", path: [variableId] }],
+        }),
+      ])
+    );
+  });
+
+  test("distinguishes locally written namespaces from additional invalidations", async () => {
+    const state = createBuilderStateFromSnapshot(build);
+    state.resources?.set("resource", {
+      id: "resource",
+      name: "Users",
+      method: "get",
+      url: '"https://example.com/users"',
+      headers: [],
+    });
+    const storage = createStorage(createPersistedSnapshot({ state }));
+    const transport = createTransport();
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("resources.update", {
+      resourceId: "resource",
+      values: { name: "Customers" },
+    });
+
+    expect(result.source).toBe("local");
+    expect(result.state.committed).toBe(true);
+    expect(storage.saved.at(-1)?.freshness.resources).toMatchObject({
+      status: "invalidated",
+      version: 2,
+      source: "local",
+      invalidatedBy: "resources.update",
+    });
+    expect(storage.saved.at(-1)?.freshness.pages).toMatchObject({
+      status: "invalidated",
+      version: 1,
+      invalidatedBy: "resources.update",
+    });
+  });
+
+  test("returns actionable validation issues from local runtime operations", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const session = createSession({ storage, transport: createTransport() });
+
+    await session.initialize();
+    const result = await session.mutate("pages.update", {
+      pageId: "page-home",
+      values: { name: 42 },
+    });
+
+    expect(result.state.committed).toBe(false);
+    expect(serializeProjectSessionMeta(result)).toMatchObject({
+      commitStatus: "failed",
+      committed: false,
+    });
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "INVALID_INPUT",
+        issues: [
+          expect.objectContaining({
+            code: "invalid_type",
+            path: ["values", "name"],
+            constraint: "type:string",
+            example: "string",
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  test("refreshes required namespaces and returns conflict diagnostic", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    transport.commitPatch = async () => {
+      throw Object.assign(new Error("Build version mismatch"), {
+        code: "CONFLICT",
+      });
+    };
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("instances.updateProps", {
+      updates: [
+        {
+          instanceId: "instance-root",
+          name: "Title",
+          type: "string",
+          value: "Conflict",
+        },
+      ],
+    });
+
+    expect(result.state.committed).toBe(false);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: "CONFLICT" }),
+      expect.objectContaining({ code: "CONFLICT_REFRESHED" }),
+    ]);
+    expect(transport.loadedNamespaces).toEqual([
+      ["instances", "props", "dataSources"],
+    ]);
+  });
+
+  test("retries retry-safe mutations once after conflict refresh", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport(createSnapshot({ version: 2 }));
+    let attempts = 0;
+    transport.commitPatch = async (input) => {
+      attempts += 1;
+      transport.commits.push([...input.transactions]);
+      if (attempts <= 2) {
+        throw Object.assign(new Error("Build version mismatch"), {
+          code: "CONFLICT",
+        });
+      }
+      return { version: input.baseVersion + 1 };
+    };
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("pages.update", {
+      pageId: "page-home",
+      values: { name: "Home updated" },
+    });
+
+    expect(result.state.committed).toBe(true);
+    expect(result.version).toBe(3);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: "CONFLICT" }),
+      expect.objectContaining({ code: "CONFLICT_REFRESHED" }),
+      expect.objectContaining({ code: "CONFLICT_RETRY" }),
+    ]);
+    expect(transport.loadedNamespaces).toEqual([
+      ["pages", "instances", "dataSources"],
+    ]);
+    expect(transport.commits).toHaveLength(3);
+  });
+
+  test("confirms an ambiguous commit with the same transaction", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    let committedTransactionId: string | undefined;
+    transport.commitPatch = async (input) => {
+      transport.commits.push([...input.transactions]);
+      const transactionId = input.transactions[0]?.id;
+      if (transactionId === committedTransactionId) {
+        return { version: input.baseVersion + 1 };
+      }
+      committedTransactionId = transactionId;
+      throw Object.assign(new Error("Build version mismatch"), {
+        code: "CONFLICT",
+      });
+    };
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("pages.update", {
+      pageId: "page-home",
+      values: { name: "Home updated" },
+    });
+
+    expect(result.state.committed).toBe(true);
+    expect(result.version).toBe(2);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: "COMMIT_RETRY_CONFIRMED" }),
+    ]);
+    expect(transport.loadedNamespaces).toEqual([]);
+    expect(transport.commits).toHaveLength(2);
+    expect(transport.commits[0]?.[0]?.id).toBe(transport.commits[1]?.[0]?.id);
+  });
+
+  test("confirms a gateway timeout with the same transaction", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    let committedTransactionId: string | undefined;
+    transport.commitPatch = async (input) => {
+      transport.commits.push([...input.transactions]);
+      const transactionId = input.transactions[0]?.id;
+      if (transactionId === committedTransactionId) {
+        return { version: input.baseVersion + 1 };
+      }
+      committedTransactionId = transactionId;
+      throw Object.assign(new Error("Gateway Timeout"), { status: 504 });
+    };
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("pages.update", {
+      pageId: "page-home",
+      values: { name: "Home updated" },
+    });
+
+    expect(result.state.committed).toBe(true);
+    expect(result.version).toBe(2);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: "COMMIT_RETRY_CONFIRMED" }),
+    ]);
+    expect(transport.commits).toHaveLength(2);
+    expect(transport.commits[0]?.[0]?.id).toBe(transport.commits[1]?.[0]?.id);
+  });
+
+  test("confirms a JSON API gateway error with the same transaction", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    let committedTransactionId: string | undefined;
+    transport.commitPatch = async (input) => {
+      transport.commits.push([...input.transactions]);
+      const transactionId = input.transactions[0]?.id;
+      if (transactionId === committedTransactionId) {
+        return { version: input.baseVersion + 1 };
+      }
+      committedTransactionId = transactionId;
+      throw Object.assign(new Error("Gateway Timeout"), {
+        data: { httpStatus: 504 },
+      });
+    };
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("pages.update", {
+      pageId: "page-home",
+      values: { name: "Home updated" },
+    });
+
+    expect(result.state.committed).toBe(true);
+    expect(result.version).toBe(2);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: "COMMIT_RETRY_CONFIRMED" }),
+    ]);
+    expect(transport.commits).toHaveLength(2);
+    expect(transport.commits[0]?.[0]?.id).toBe(transport.commits[1]?.[0]?.id);
+  });
+
+  test("keeps a conflict confirmation timeout ambiguous", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    let attempts = 0;
+    transport.commitPatch = async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error("Build version mismatch"), {
+          code: "CONFLICT",
+        });
+      }
+      throw Object.assign(new Error("Connection reset"), {
+        code: "ECONNRESET",
+      });
+    };
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("pages.update", {
+      pageId: "page-home",
+      values: { name: "Conflict" },
+    });
+
+    expect(result.state.committed).toBe(false);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "AMBIGUOUS_COMMIT",
+        details: expect.objectContaining({
+          confirmationFailure: {
+            code: "ECONNRESET",
+            message: "Connection reset",
+          },
+        }),
+      }),
+      expect.objectContaining({ code: "COMMIT_STATE_REFRESHED" }),
+    ]);
+    expect(transport.loadedNamespaces).toEqual([
+      ["pages", "instances", "dataSources"],
+    ]);
+    expect(attempts).toBe(2);
+  });
+
+  test("reports an unconfirmed gateway timeout without calling it a conflict", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    let attempts = 0;
+    transport.commitPatch = async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error("Gateway Timeout"), { status: 504 });
+      }
+      throw Object.assign(new Error("Connection reset"), {
+        code: "ECONNRESET",
+      });
+    };
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("pages.update", {
+      pageId: "page-home",
+      values: { name: "Possibly committed" },
+    });
+
+    expect(result.state.committed).toBe(false);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "AMBIGUOUS_COMMIT",
+        details: expect.objectContaining({
+          confirmationFailure: {
+            code: "ECONNRESET",
+            message: "Connection reset",
+          },
+        }),
+      }),
+      expect.objectContaining({ code: "COMMIT_STATE_REFRESHED" }),
+    ]);
+    expect(attempts).toBe(2);
+  });
+
+  test("keeps a gateway timeout ambiguous when confirmation conflicts", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    let attempts = 0;
+    transport.commitPatch = async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error("Gateway Timeout"), { status: 504 });
+      }
+      throw Object.assign(new Error("Build version mismatch"), {
+        code: "CONFLICT",
+      });
+    };
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate("pages.update", {
+      pageId: "page-home",
+      values: { name: "Possibly committed" },
+    });
+
+    expect(result.state.committed).toBe(false);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "AMBIGUOUS_COMMIT",
+        details: expect.objectContaining({
+          confirmationFailure: {
+            code: "CONFLICT",
+            message: "Build version mismatch",
+          },
+        }),
+      }),
+      expect.objectContaining({ code: "COMMIT_STATE_REFRESHED" }),
+    ]);
+    expect(attempts).toBe(2);
+  });
+
+  test("clears cached permissions after authorization confirmation failure", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    let attempts = 0;
+    transport.commitPatch = async (input) => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error("Build version mismatch"), {
+          code: "CONFLICT",
+        });
+      }
+      if (attempts === 2) {
+        throw Object.assign(new Error("Token expired"), {
+          code: "UNAUTHORIZED",
+        });
+      }
+      return { version: input.baseVersion + 1 };
+    };
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    await session.mutate(
+      "pages.update",
+      { pageId: "page-home", values: { name: "First" } },
+      { permit: "build" }
+    );
+    await session.mutate(
+      "pages.update",
+      { pageId: "page-home", values: { name: "Second" } },
+      { permit: "build" }
+    );
+
+    expect(transport.permissionReads).toBe(2);
+  });
+
+  test("checks and caches permissions for local runtime mutations", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    await session.mutate(
+      "instances.updateProps",
+      {
+        updates: [
+          {
+            instanceId: "instance-root",
+            name: "Title",
+            type: "string",
+            value: "First",
+          },
+        ],
+      },
+      { permit: "build" }
+    );
+    await session.mutate(
+      "instances.updateProps",
+      {
+        updates: [
+          {
+            instanceId: "instance-root",
+            name: "Title",
+            type: "string",
+            value: "Second",
+          },
+        ],
+      },
+      { permit: "build" }
+    );
+
+    expect(transport.permissionReads).toBe(1);
+  });
+
+  test("returns diagnostic when cached permissions deny local mutation", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    transport.getPermissions = async () => {
+      transport.permissionReads += 1;
+      return {
+        canView: true,
+        canEdit: false,
+        canBuild: false,
+        canAdmin: false,
+        canUseApi: true,
+      };
+    };
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.mutate(
+      "folders.create",
+      { name: "New", slug: "new" },
+      { permit: "build" }
+    );
+
+    expect(result.state.committed).toBe(false);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        level: "error",
+        message: "Authorization token does not have build permission.",
+      }),
+    ]);
+    expect(transport.commits).toEqual([]);
+  });
+
+  test("clears cached permissions after plan errors", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    let attempts = 0;
+    transport.commitPatch = async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error("API permission requires an upgrade."), {
+          code: "PLAN_REQUIRED",
+        });
+      }
+      return { version: 2 };
+    };
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    await session.mutate(
+      "instances.updateProps",
+      {
+        updates: [
+          {
+            instanceId: "instance-root",
+            name: "Title",
+            type: "string",
+            value: "First",
+          },
+        ],
+      },
+      { permit: "build" }
+    );
+    await session.mutate(
+      "instances.updateProps",
+      {
+        updates: [
+          {
+            instanceId: "instance-root",
+            name: "Title",
+            type: "string",
+            value: "Second",
+          },
+        ],
+      },
+      { permit: "build" }
+    );
+
+    expect(transport.permissionReads).toBe(2);
+  });
+
+  test("marks server-only invalidated namespaces stale without guessing semantics", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport();
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.executeServerOperation(
+      {
+        id: "upload-asset",
+        method: "mutation",
+        invalidatesNamespaces: ["assets"],
+      },
+      { file: "image.png" }
+    );
+
+    expect(result.source).toBe("server");
+    expect(result.namespaces.invalidated).toEqual(["assets"]);
+    expect(storage.saved.at(-1)?.freshness.assets?.status).toBe("invalidated");
+  });
+
+  test("returns refreshed snapshot metadata after server-only invalidation refetch", async () => {
+    const storage = createStorage(createPersistedSnapshot());
+    const transport = createTransport(createSnapshot({ version: 5 }));
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const result = await session.executeServerOperation(
+      {
+        id: "upload-asset",
+        method: "mutation",
+        invalidatesNamespaces: ["assets"],
+        refetchInvalidatedNamespaces: true,
+      },
+      { file: "image.png" }
+    );
+
+    expect(result.version).toBe(5);
+    expect(result.state.freshness.assets?.status).toBe("fresh");
+    expect(transport.loadedNamespaces).toEqual([["assets"]]);
+    expect(storage.saved.at(-1)?.version).toBe(5);
+  });
+
+  test("plans and atomically restores a versioned Build snapshot", async () => {
+    const target = createPersistedSnapshot();
+    const current = structuredClone(target);
+    current.version = 2;
+    current.revision = "rev-2";
+    const currentHome = current.state.pages?.pages.get("page-home");
+    if (currentHome === undefined) {
+      throw new Error("Home page fixture is missing");
+    }
+    currentHome.name = "Edited after restore point";
+    const storage = createStorage(current);
+    const transport = createMutableTransport({
+      projectId: current.projectId,
+      buildId: current.buildId,
+      version: current.version,
+      state: current.state,
+    });
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const planned = await session.restoreSnapshot(target, { dryRun: true });
+    expect(planned.source).toBe("dry-run");
+    expect(planned.transaction?.payload).toContainEqual({
+      namespace: "pages",
+      patches: [expect.objectContaining({ op: "replace", path: [] })],
+    });
+
+    const restored = await session.restoreSnapshot(target);
+    expect(restored.state.committed).toBe(true);
+    expect(restored.result.restoredNamespaces).toEqual(["pages"]);
+    expect(session.snapshot?.state.pages?.pages.get("page-home")?.name).toBe(
+      target.state.pages?.pages.get("page-home")?.name
+    );
+    expect(transport.commits).toHaveLength(1);
+    expect(transport.patchCommits).toHaveLength(0);
+    expect(transport.restoreCommits).toHaveLength(1);
+  });
+
+  test("confirms an ambiguous restore with the same transaction", async () => {
+    const target = createPersistedSnapshot();
+    const current = structuredClone(target);
+    current.version = 2;
+    current.revision = "rev-2";
+    const currentHome = current.state.pages?.pages.get("page-home");
+    if (currentHome === undefined) {
+      throw new Error("Home page fixture is missing");
+    }
+    currentHome.name = "Edited after restore point";
+    const storage = createStorage(current);
+    const transport = createTransport({
+      projectId: current.projectId,
+      buildId: current.buildId,
+      version: current.version,
+      state: current.state,
+    });
+    let committedTransactionId: string | undefined;
+    transport.commitRestorePoint = async (input) => {
+      transport.commits.push([...input.transactions]);
+      transport.restoreCommits.push([...input.transactions]);
+      const transactionId = input.transactions[0]?.id;
+      if (transactionId === committedTransactionId) {
+        return { version: input.baseVersion + 1 };
+      }
+      committedTransactionId = transactionId;
+      throw Object.assign(new Error("Build version mismatch"), {
+        code: "CONFLICT",
+      });
+    };
+    const session = createSession({ storage, transport });
+
+    await session.initialize();
+    const restored = await session.restoreSnapshot(target);
+
+    expect(restored.state.committed).toBe(true);
+    expect(restored.version).toBe(3);
+    expect(restored.diagnostics).toEqual([
+      expect.objectContaining({ code: "COMMIT_RETRY_CONFIRMED" }),
+    ]);
+    expect(transport.restoreCommits).toHaveLength(2);
+    expect(transport.restoreCommits[0]?.[0]?.id).toBe(
+      transport.restoreCommits[1]?.[0]?.id
+    );
+  });
+
+  test("keeps separately persisted assets outside restore points", async () => {
+    const current = createPersistedSnapshot();
+    current.state.assets = new Map([
+      [
+        "asset-current",
+        {
+          id: "asset-current",
+          projectId: current.projectId,
+          name: "current.png",
+          type: "image",
+          size: 1,
+          format: "png",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          meta: { width: 1, height: 1 },
+        },
+      ],
+    ]);
+    current.freshness = createBuilderStateFreshness({
+      state: current.state,
+      version: current.version,
+    });
+    const session = createSession({ storage: createStorage(current) });
+
+    await session.initialize();
+    const restorePoint = await session.captureRestorePointSnapshot();
+    expect(restorePoint.state.assets).toBeUndefined();
+    expect(restorePoint.freshness.assets).toBeUndefined();
+
+    const result = await session.restoreSnapshot({
+      ...restorePoint,
+      state: {
+        ...restorePoint.state,
+        assets: new Map(),
+      },
+    });
+    expect(result.result.restoredNamespaces).not.toContain("assets");
+    expect(session.snapshot?.state.assets?.has("asset-current")).toBe(true);
+  });
+
+  test("rejects restore points from another editable build", async () => {
+    const current = createPersistedSnapshot();
+    const session = createSession({ storage: createStorage(current) });
+    await session.initialize();
+
+    await expect(
+      session.restoreSnapshot({ ...current, buildId: "another-build" })
+    ).rejects.toThrow("different editable build");
+  });
+
+  test("restores snapshots with optional namespaces absent on both sides", async () => {
+    const target = createPersistedSnapshot();
+    const current = structuredClone(target);
+    target.state.marketplaceProduct = undefined;
+    current.state.marketplaceProduct = undefined;
+    const currentHome = current.state.pages?.pages.get("page-home");
+    if (currentHome === undefined) {
+      throw new Error("Home page fixture is missing");
+    }
+    currentHome.name = "Edited after restore point";
+    const transport = createMutableTransport({
+      projectId: current.projectId,
+      buildId: current.buildId,
+      version: current.version,
+      state: current.state,
+    });
+    const session = createSession({
+      storage: createStorage(current),
+      transport,
+    });
+    await session.initialize();
+
+    const result = await session.restoreSnapshot(target, { dryRun: true });
+
+    expect(result.result.restoredNamespaces).toEqual(["pages"]);
+  });
+
+  test("restores marketplace product presence and absence", async () => {
+    const withProduct = createPersistedSnapshot();
+    const withoutProduct = structuredClone(withProduct);
+    withoutProduct.state.marketplaceProduct = undefined;
+    withoutProduct.freshness = createBuilderStateFreshness({
+      state: withoutProduct.state,
+      version: withoutProduct.version,
+    });
+
+    const clearTransport = createMutableTransport({
+      projectId: withProduct.projectId,
+      buildId: withProduct.buildId,
+      version: withProduct.version,
+      state: withProduct.state,
+    });
+    const clearSession = createSession({
+      storage: createStorage(withProduct),
+      transport: clearTransport,
+    });
+    await clearSession.initialize();
+    const cleared = await clearSession.restoreSnapshot(withoutProduct);
+    expect(cleared.result.restoredNamespaces).toEqual(["marketplaceProduct"]);
+    expect(clearSession.snapshot?.state.marketplaceProduct).toBeUndefined();
+
+    const restoreTransport = createMutableTransport({
+      projectId: withoutProduct.projectId,
+      buildId: withoutProduct.buildId,
+      version: withoutProduct.version,
+      state: withoutProduct.state,
+    });
+    const restoreSession = createSession({
+      storage: createStorage(withoutProduct),
+      transport: restoreTransport,
+    });
+    await restoreSession.initialize();
+    const restored = await restoreSession.restoreSnapshot(withProduct);
+    expect(restored.result.restoredNamespaces).toEqual(["marketplaceProduct"]);
+    expect(restoreSession.snapshot?.state.marketplaceProduct).toEqual(
+      withProduct.state.marketplaceProduct
+    );
+  });
+
+  test("redacts sensitive diagnostic values", () => {
+    expect(
+      redactProjectSessionValue({
+        authToken: "secret",
+        nested: { token: "secret", value: "visible" },
+      })
+    ).toEqual({
+      authToken: "[redacted]",
+      nested: { token: "[redacted]", value: "visible" },
+    });
+  });
+
+  test("requires api permission before local project permits", () => {
+    expect(
+      hasProjectSessionPermit(
+        {
+          canView: true,
+          canEdit: true,
+          canBuild: true,
+          canAdmin: true,
+          canUseApi: false,
+        },
+        "build"
+      )
+    ).toBe(false);
+    expect(
+      hasProjectSessionPermit(
+        {
+          canView: true,
+          canEdit: false,
+          canBuild: false,
+          canAdmin: false,
+          canUseApi: true,
+        },
+        "view"
+      )
+    ).toBe(true);
+  });
+});

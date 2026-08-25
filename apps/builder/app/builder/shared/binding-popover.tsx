@@ -11,7 +11,6 @@ import {
   DotIcon,
   InfoCircleIcon,
   PlusIcon,
-  ResetIcon,
   TrashIcon,
 } from "@webstudio-is/icons";
 import {
@@ -22,45 +21,34 @@ import {
   DialogTitleActions,
   DialogClose,
   DialogTitle,
-  Flex,
   FloatingPanel,
+  Flex,
   Label,
   ScrollArea,
+  ScrollAreaNative,
   SmallIconButton,
   Text,
   Tooltip,
   theme,
 } from "@webstudio-is/design-system";
+import { getExpressionIdentifiers } from "@webstudio-is/expression";
+import { getExpressionErrorMessages } from "@webstudio-is/project-build/runtime";
+import { $isDesignMode } from "~/shared/nano-states";
 import {
-  decodeDataSourceVariable,
-  getExpressionIdentifiers,
-  lintExpression,
-} from "@webstudio-is/sdk";
-import { $dataSourceVariables, $isDesignMode } from "~/shared/nano-states";
-import {
-  computeExpression,
+  computeExpressionWithinScope,
   encodeDataVariableName,
-} from "~/shared/data-variables";
+} from "@webstudio-is/project-build/runtime";
 import {
   ExpressionEditor,
   formatValuePreview,
   type EditorApi,
 } from "./expression-editor";
+import { normalizeEditorValue } from "~/shared/code-editor-base";
 
 export const evaluateExpressionWithinScope = (
   expression: string,
   scope: Record<string, unknown>
-) => {
-  const variables = new Map<string, unknown>();
-  for (const [name, value] of Object.entries(scope)) {
-    const decodedName = decodeDataSourceVariable(name);
-    if (decodedName) {
-      variables.set(decodedName, value);
-    }
-  }
-
-  return computeExpression(expression, variables);
-};
+) => computeExpressionWithinScope(expression, scope);
 
 const BindingPanel = ({
   scope,
@@ -73,27 +61,26 @@ const BindingPanel = ({
   scope: Record<string, unknown>;
   aliases: Map<string, string>;
   valueError?: string;
-  value: string;
+  value?: string;
   onChange: () => void;
   onSave: (value: string, invalid: boolean) => void;
 }) => {
   const editorApiRef = useRef<undefined | EditorApi>(undefined);
-  const [expression, setExpression] = useState(value);
+  const normalizedValue = normalizeEditorValue(value);
+  const [expression, setExpression] = useState(normalizedValue);
   const usedIdentifiers = useMemo(
-    () => getExpressionIdentifiers(value),
-    [value]
+    () => getExpressionIdentifiers(normalizedValue),
+    [normalizedValue]
   );
   const [errorsCount, setErrorsCount] = useState<number>(0);
   const [touched, setTouched] = useState(false);
   const scopeEntries = Object.entries(scope);
 
   const validate = (expression: string) => {
-    const diagnostics = lintExpression({
+    const errors = getExpressionErrorMessages({
       expression,
       availableVariables: new Set(aliases.keys()),
     });
-    // prevent saving expression only with syntax error
-    const errors = diagnostics.filter((item) => item.severity === "error");
     setErrorsCount(errors.length);
   };
 
@@ -113,7 +100,7 @@ const BindingPanel = ({
     >
       <Box css={{ paddingBottom: theme.spacing[5] }}>
         <Flex gap="1" css={{ padding: theme.panel.padding }}>
-          <Text variant="labelsSentenceCase">Variables</Text>
+          <Text variant="labels">Variables</Text>
           <Tooltip
             variant="wrapped"
             content={
@@ -125,46 +112,48 @@ const BindingPanel = ({
         </Flex>
         {scopeEntries.length === 0 && (
           <Flex justify="center" align="center" css={{ py: theme.spacing[5] }}>
-            <Text variant="labelsSentenceCase" align="center">
+            <Text variant="labels" align="center">
               No variables available
             </Text>
           </Flex>
         )}
-        <CssValueListArrowFocus>
-          {scopeEntries.map(([identifier, value], index) => {
-            const name = aliases.get(identifier);
-            const label =
-              value === undefined
-                ? name
-                : `${name}: ${formatValuePreview(value)}`;
-            return (
-              <CssValueListItem
-                key={identifier}
-                id={identifier}
-                index={index}
-                label={<Label truncate>{label}</Label>}
-                // mark all variables used in expression as selected
-                active={usedIdentifiers.has(identifier)}
-                // convert variable to expression
-                onClick={() => {
-                  if (name) {
-                    const nameIdentifier = encodeDataVariableName(name);
-                    editorApiRef.current?.replaceSelection(nameIdentifier);
-                  }
-                }}
-                // expression editor blur is fired after pointer down even
-                // preventing it allows to not trigger validation
-                // and flickering error tooltip
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                }}
-              />
-            );
-          })}
-        </CssValueListArrowFocus>
+        <ScrollAreaNative css={{ maxHeight: theme.spacing[25] }}>
+          <CssValueListArrowFocus>
+            {scopeEntries.map(([identifier, value], index) => {
+              const name = aliases.get(identifier);
+              const label =
+                value === undefined
+                  ? name
+                  : `${name}: ${formatValuePreview(value)}`;
+              return (
+                <CssValueListItem
+                  key={identifier}
+                  id={identifier}
+                  index={index}
+                  label={<Label truncate>{label}</Label>}
+                  // mark all variables used in expression as selected
+                  active={usedIdentifiers.has(identifier)}
+                  // convert variable to expression
+                  onClick={() => {
+                    if (name) {
+                      const nameIdentifier = encodeDataVariableName(name);
+                      editorApiRef.current?.replaceSelection(nameIdentifier);
+                    }
+                  }}
+                  // expression editor blur is fired after pointer down even
+                  // preventing it allows to not trigger validation
+                  // and flickering error tooltip
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                  }}
+                />
+              );
+            })}
+          </CssValueListArrowFocus>
+        </ScrollAreaNative>
       </Box>
       <Flex gap="1" css={{ padding: theme.panel.padding }}>
-        <Text variant="labelsSentenceCase">Expression Editor</Text>
+        <Text variant="labels">Expression editor</Text>
         <Tooltip
           variant="wrapped"
           content={
@@ -221,44 +210,21 @@ export const BindingControl = ({ children }: { children: ReactNode }) => {
   );
 };
 
-export type BindingVariant = "default" | "bound" | "overwritten";
+export type BindingVariant = "default" | "bound";
 
 const BindingButton = forwardRef<
   HTMLButtonElement,
   ButtonHTMLAttributes<HTMLButtonElement> & {
     variant: BindingVariant;
     error?: string;
-    value: string;
   }
->(({ variant, error, value, ...props }, ref) => {
+>(({ variant, error, ...props }, ref) => {
   const expanded = props["aria-expanded"];
-  const overwrittenMessage =
-    variant === "overwritten" ? (
-      <Flex direction="column" gap="2" css={{ maxWidth: theme.spacing[28] }}>
-        <Text>Bound variable is overwritten with temporary value</Text>
-        <Button
-          color="dark"
-          prefix={<ResetIcon />}
-          css={{ flexGrow: 1 }}
-          onClick={() => {
-            const potentialVariableId = decodeDataSourceVariable(value);
-            const dataSourceVariables = new Map($dataSourceVariables.get());
-            if (potentialVariableId !== undefined) {
-              dataSourceVariables.delete(potentialVariableId);
-              $dataSourceVariables.set(dataSourceVariables);
-            }
-          }}
-        >
-          Reset value
-        </Button>
-      </Flex>
-    ) : undefined;
-  const tooltipContent = error ?? overwrittenMessage;
   return (
     // prevent giving content to tooltip when popover is open
     // to avoid button remounting and popover flickering
     // when switch between valid and error value
-    <Tooltip content={expanded ? undefined : tooltipContent} delayDuration={0}>
+    <Tooltip content={expanded ? undefined : error} delayDuration={0}>
       <SmallIconButton
         ref={ref}
         data-variant={variant}
@@ -279,7 +245,7 @@ const BindingButton = forwardRef<
           transitionTimingFunction: "cubic-bezier(0.37, 0, 0.63, 1)",
           "--dot-display": "block",
           "--plus-display": "none",
-          "&[data-variant=bound], &[data-variant=overwritten]": {
+          "&[data-variant=bound]": {
             opacity: 1,
           },
           "&:hover, &:focus-visible, &[aria-expanded=true]": {
@@ -300,15 +266,12 @@ const BindingButton = forwardRef<
               width: 12,
               height: 12,
               borderRadius: "50%",
-              backgroundColor: theme.colors.backgroundStyleSourceToken,
+              backgroundColor: theme.colors.backgroundStyleSourceSelected,
               display: "flex",
               justifyContent: "center",
               alignItems: "center",
               "&[data-variant=bound]": {
-                backgroundColor: theme.colors.backgroundStyleSourceLocal,
-              },
-              "&[data-variant=overwritten]": {
-                backgroundColor: theme.colors.borderOverwrittenMain,
+                backgroundColor: theme.colors.backgroundStyleSourceSelected,
               },
               "&[data-variant=error]": {
                 backgroundColor: theme.colors.backgroundDestructiveMain,
@@ -345,9 +308,9 @@ export const BindingPopover = ({
   aliases: Map<string, string>;
   variant: BindingVariant;
   validate?: (value: unknown) => undefined | string;
-  value: string;
+  value?: string;
   onChange: (newValue: string) => void;
-  onRemove: (evaluatedValue: unknown) => void;
+  onRemove?: (evaluatedValue: unknown) => void;
 }) => {
   const [isOpen, onOpenChange] = useState(false);
   const hasUnsavedChange = useRef<boolean>(false);
@@ -358,10 +321,14 @@ export const BindingPopover = ({
     return;
   }
 
-  const valueError = validate?.(evaluateExpressionWithinScope(value, scope));
+  const normalizedValue = normalizeEditorValue(value);
+  const valueError = validate?.(
+    evaluateExpressionWithinScope(normalizedValue, scope)
+  );
   return (
     <FloatingPanel
       placement="left-start"
+      anchor="trigger"
       open={isOpen}
       onOpenChange={(newOpen) => {
         // handle special case for popover close
@@ -387,12 +354,15 @@ export const BindingPopover = ({
                     aria-label="Reset binding"
                     prefix={<TrashIcon />}
                     color="ghost"
-                    disabled={variant === "default"}
+                    disabled={variant === "default" || onRemove === undefined}
                     onClick={(event) => {
                       event.preventDefault();
+                      if (onRemove === undefined) {
+                        return;
+                      }
                       // inline variables and close dialog
                       const evaluatedValue = evaluateExpressionWithinScope(
-                        value,
+                        normalizedValue,
                         scope
                       );
 
@@ -416,7 +386,7 @@ export const BindingPopover = ({
           scope={scope}
           aliases={aliases}
           valueError={valueError}
-          value={value}
+          value={normalizedValue}
           onChange={() => {
             hasUnsavedChange.current = true;
           }}
@@ -440,7 +410,7 @@ export const BindingPopover = ({
         />
       }
     >
-      <BindingButton variant={variant} error={valueError} value={value} />
+      <BindingButton variant={variant} error={valueError} />
     </FloatingPanel>
   );
 };

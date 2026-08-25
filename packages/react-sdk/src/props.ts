@@ -1,10 +1,13 @@
 import {
   type Prop,
+  type Instances,
+  type Props,
   type Assets,
   type Pages,
   type ImageAsset,
   getPagePath,
   findPageByIdOrPath,
+  findTreeInstanceIdsExcludingSubtrees,
 } from "@webstudio-is/sdk";
 
 export const normalizeProps = ({
@@ -135,8 +138,34 @@ export const idAttribute = "data-ws-id" as const;
 export const selectorIdAttribute = "data-ws-selector" as const;
 export const componentAttribute = "data-ws-component" as const;
 export const showAttribute = "data-ws-show" as const;
-export const collapsedAttribute = "data-ws-collapsed" as const;
+export const inflatedAttribute = "data-ws-collapsed" as const;
 export const textContentAttribute = "data-ws-text-content" as const;
+
+export const findTreeInstanceIdsExcludingStaticHidden = ({
+  instances,
+  props,
+  rootInstanceId,
+}: {
+  instances: Instances;
+  props: Props;
+  rootInstanceId: string;
+}) => {
+  const hiddenInstanceIds = new Set<string>();
+  for (const prop of props.values()) {
+    if (
+      prop.name === showAttribute &&
+      prop.type === "boolean" &&
+      prop.value === false
+    ) {
+      hiddenInstanceIds.add(prop.instanceId);
+    }
+  }
+  return findTreeInstanceIdsExcludingSubtrees(
+    instances,
+    rootInstanceId,
+    hiddenInstanceIds
+  );
+};
 
 /**
  * Copyright (c) Meta Platforms, Inc. and affiliates.

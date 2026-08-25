@@ -2,22 +2,21 @@ import type {
   Asset,
   FontAsset,
   ImageAsset,
+  VideoAsset,
   AllowedFileExtension,
 } from "@webstudio-is/sdk";
 import { nanoid } from "nanoid";
 import {
   getMimeTypeByExtension,
+  getFileExtension,
   IMAGE_EXTENSIONS,
   detectAssetType,
-  getAssetUrl,
+  getAssetContentHash,
 } from "@webstudio-is/sdk";
 import type { UploadingFileData } from "~/shared/nano-states";
 
-export { detectAssetType, getAssetUrl };
-
 export const getImageNameAndType = (fileName: string) => {
-  // Extract extension from filename
-  const extractedExt = fileName.split(".").pop()?.toLowerCase();
+  const extractedExt = getFileExtension(fileName)?.toLowerCase();
 
   if (!extractedExt) {
     return;
@@ -55,18 +54,9 @@ const extractImageNameAndMimeTypeFromUrl = (url: URL) => {
   return [FALLBACK_URL_TYPE, `${nanoid()}.png`] as const;
 };
 
-const bufferToHex = (buffer: ArrayBuffer) => {
-  const byteArray = new Uint8Array(buffer);
-  return Array.from(byteArray, (byte) =>
-    byte.toString(16).padStart(2, "0")
-  ).join("");
-};
-
 export const getSha256Hash = async (data: string) => {
   const encoder = new TextEncoder();
-  const dataBuffer = encoder.encode(data);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", dataBuffer);
-  return bufferToHex(hashBuffer);
+  return getAssetContentHash(encoder.encode(data));
 };
 
 const readFileAsArrayBuffer = (file: File): Promise<ArrayBuffer> =>
@@ -79,9 +69,14 @@ const readFileAsArrayBuffer = (file: File): Promise<ArrayBuffer> =>
 
 export const getSha256HashOfFile = async (file: File) => {
   const arrayBuffer = await readFileAsArrayBuffer(file);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer);
-  return bufferToHex(hashBuffer);
+  return getAssetContentHash(arrayBuffer);
 };
+
+export const getFileUploadFingerprint = async (
+  file: File,
+  contentHash?: string
+) =>
+  JSON.stringify([file.name, contentHash ?? (await getSha256HashOfFile(file))]);
 
 export const getMimeType = (file: File | URL) => {
   if (file instanceof File) {
@@ -110,45 +105,25 @@ export const uploadingFileDataToAsset = (
   // Extract format from MIME type if available, otherwise from filename extension
   let format = mimeType.split("/")[1];
   if (!format) {
-    // Fallback to file extension if MIME type doesn't provide format
-    const match = fileName.match(/\.([^.]+)$/);
-    format = match ? match[1].toLowerCase() : "";
+    format = getFileExtension(fileName)?.toLowerCase() ?? "";
   }
 
   const assetType = detectAssetType(fileName);
-
-  if (assetType === "video") {
-    // Use image type for now
-    const asset: ImageAsset = {
-      id: fileData.assetId,
-      name: fileName,
-      format,
-      type: "image",
-      description: "",
-      createdAt: "",
-      projectId: "",
-      size: 0,
-
-      meta: {
-        width: Number.NaN,
-        height: Number.NaN,
-      },
-    };
-
-    return asset;
-  }
+  const base = {
+    id: fileData.assetId,
+    name: fileName,
+    description: "",
+    createdAt: "",
+    projectId: "",
+    size: 0,
+    folderId: fileData.folderId,
+  };
 
   if (assetType === "image") {
     const asset: ImageAsset = {
-      id: fileData.assetId,
-      name: fileName,
+      ...base,
       format,
       type: "image",
-      description: "",
-      createdAt: "",
-      projectId: "",
-      size: 0,
-
       meta: {
         width: Number.NaN,
         height: Number.NaN,
@@ -160,14 +135,9 @@ export const uploadingFileDataToAsset = (
 
   if (assetType === "font") {
     const asset: FontAsset = {
-      id: fileData.assetId,
-      name: fileName,
+      ...base,
       format: format as FontAsset["format"],
       type: "font",
-      description: "",
-      createdAt: "",
-      projectId: "",
-      size: 0,
       meta: {
         family: "system",
         style: "normal",
@@ -178,46 +148,26 @@ export const uploadingFileDataToAsset = (
     return asset;
   }
 
-  // Default to file type for all other types (documents, code, audio, etc.)
+  if (assetType === "video") {
+    const asset: VideoAsset = {
+      ...base,
+      format,
+      type: "video",
+      meta: {
+        width: Number.NaN,
+        height: Number.NaN,
+      },
+    };
+
+    return asset;
+  }
+
   const asset: Asset = {
-    id: fileData.assetId,
-    name: fileName,
+    ...base,
     format,
     type: "file",
-    description: "",
-    createdAt: "",
-    projectId: "",
-    size: 0,
     meta: {},
   };
 
   return asset;
-};
-
-type ParsedAssetName = {
-  basename: string;
-  hash: string;
-  ext: string;
-};
-
-export const parseAssetName = (name: string): ParsedAssetName => {
-  let hash = "";
-  let ext = "";
-  const lastDotAt = name.lastIndexOf(".");
-  if (lastDotAt > -1) {
-    ext = name.slice(lastDotAt + 1);
-    name = name.slice(0, lastDotAt);
-  }
-  const lastUnderscoreAt = name.lastIndexOf("_");
-  if (lastUnderscoreAt > -1) {
-    hash = name.slice(lastUnderscoreAt + 1);
-    name = name.slice(0, lastUnderscoreAt);
-  }
-  return { basename: name, hash, ext };
-};
-
-export const formatAssetName = (asset: Pick<Asset, "name" | "filename">) => {
-  const { basename, ext } = parseAssetName(asset.name);
-  const formattedName = `${asset.filename ?? basename}.${ext}`;
-  return formattedName;
 };

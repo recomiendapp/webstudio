@@ -8,12 +8,12 @@ import type {
   DataSource,
   WsComponentMeta,
   IndexesWithinAncestors,
+  Resources,
 } from "@webstudio-is/sdk";
 import {
   parseComponentName,
   generateExpression,
   decodeDataSourceVariable,
-  transpileExpression,
   blockComponent,
   blockTemplateComponent,
   collectionComponent,
@@ -21,9 +21,11 @@ import {
   getIndexesWithinAncestors,
   elementComponent,
 } from "@webstudio-is/sdk";
+import { transpileExpression } from "@webstudio-is/expression";
 import { indexProperty, tagProperty } from "@webstudio-is/sdk/runtime";
 import { isAttributeNameSafe, showAttribute } from "./props";
 import { standardAttributesToReactProps } from "./__generated__/standard-attributes";
+import { generateCollectionIterationCode } from "./collection-utils";
 
 /**
  * (arg1) => {
@@ -148,6 +150,7 @@ export const generateJsxElement = ({
   tagsOverrides,
   instance,
   props,
+  resources,
   dataSources,
   usedDataSources,
   indexesWithinAncestors,
@@ -163,6 +166,7 @@ export const generateJsxElement = ({
   tagsOverrides?: Record<string, string>;
   instance: Instance;
   props: Props;
+  resources?: Resources;
   dataSources: DataSources;
   usedDataSources: DataSources;
   indexesWithinAncestors: IndexesWithinAncestors;
@@ -191,13 +195,22 @@ export const generateJsxElement = ({
   let conditionValue: undefined | string;
   let collectionDataValue: undefined | string;
   let collectionItemValue: undefined | string;
+  let collectionItemKeyValue: undefined | string;
   let classNameValue: undefined | string;
+  const instanceProps = Array.from(props.values()).filter(
+    (prop) => prop.instanceId === instance.id
+  );
+  const instancePropNames = new Set(instanceProps.map((prop) => prop.name));
+  const projectedResourceProps = new Map<string, unknown>();
 
-  for (const prop of props.values()) {
-    if (prop.instanceId !== instance.id) {
-      continue;
+  const getGeneratedPropName = (name: string) => {
+    if (hasTags && !meta?.props?.[name]) {
+      return standardAttributesToReactProps[name] ?? name;
     }
+    return name;
+  };
 
+  for (const prop of instanceProps) {
     const propValue = generatePropValue({
       scope,
       prop,
@@ -208,12 +221,23 @@ export const generateJsxElement = ({
     if (isAttributeNameSafe(prop.name) === false) {
       continue;
     }
-    let name = prop.name;
-    // convert html attribute only when component has tags
-    // and does not specify own property with this name
-    if (hasTags && !meta?.props?.[prop.name]) {
-      name = standardAttributesToReactProps[prop.name] ?? prop.name;
+
+    if (prop.type === "resource") {
+      const propMeta = meta?.props?.[prop.name];
+      const resource = resources?.get(prop.value);
+      if (propMeta?.type === "resource" && resource !== undefined) {
+        for (const name of propMeta.generatedProps ?? []) {
+          if (
+            instancePropNames.has(name) === false &&
+            isAttributeNameSafe(name)
+          ) {
+            projectedResourceProps.set(name, resource[name]);
+          }
+        }
+      }
     }
+
+    const name = getGeneratedPropName(prop.name);
 
     // show prop controls conditional rendering and need to be handled separately
     if (prop.name === showAttribute) {
@@ -236,16 +260,29 @@ export const generateJsxElement = ({
       if (prop.name === "item") {
         collectionItemValue = propValue;
       }
+      if (prop.name === "itemKey") {
+        collectionItemKeyValue = propValue;
+      }
       continue;
     }
-    // We need to merge atomic classes with user-defined className prop.
-    if (name === "className" && propValue !== undefined) {
+    // We need to merge atomic classes with user-defined className props.
+    // Webstudio JSX stores className as "class"; keep explicit component APIs
+    // without tag metadata intact so their "class" prop is not rewritten.
+    if (
+      (name === "className" || (name === "class" && meta === undefined)) &&
+      propValue !== undefined
+    ) {
       classNameValue = propValue;
       continue;
     }
     if (propValue !== undefined) {
       generatedProps += `\n${name}={${propValue}}`;
     }
+  }
+
+  for (const [propName, value] of projectedResourceProps) {
+    const name = getGeneratedPropName(propName);
+    generatedProps += `\n${name}={${JSON.stringify(value)}}`;
   }
 
   const classMapArray = classesMap?.get(instance.id);
@@ -276,19 +313,28 @@ export const generateJsxElement = ({
       return "";
     }
     const indexVariable = scope.getName(`${instance.id}-index`, "index");
+    // use itemKey prop if provided, otherwise use generated index variable
+    const keyVariable = collectionItemKeyValue ?? indexVariable;
     // collection can be nullable or invalid type
     // fix implicitly on published sites
-    generatedElement += `{${collectionDataValue}?.map?.((${collectionItemValue}: any, ${indexVariable}: number) =>\n`;
-    generatedElement += `<Fragment key={${indexVariable}}>\n`;
+    // support both arrays and objects with Object.entries
+    generatedElement += `{${generateCollectionIterationCode({
+      dataExpression: collectionDataValue,
+      keyVariable,
+      itemVariable: collectionItemValue,
+    })} (\n`;
+    generatedElement += `<Fragment key={${keyVariable}}>\n`;
     generatedElement += children;
     generatedElement += `</Fragment>\n`;
-    generatedElement += `)}\n`;
+    generatedElement += `)\n`;
+    generatedElement += `})\n`;
+    generatedElement += `}\n`;
   } else if (instance.component === blockComponent) {
     generatedElement += children;
   } else {
     let componentVariable;
     if (instance.component === elementComponent) {
-      componentVariable = instance.tag ?? "div";
+      componentVariable = instance.tag === "" ? "div" : (instance.tag ?? "div");
       // replace html tag with component if available
       const componentDescriptor = tagsOverrides?.[componentVariable];
       if (componentDescriptor !== undefined) {
@@ -346,6 +392,7 @@ export const generateJsxChildren = ({
   children,
   instances,
   props,
+  resources,
   dataSources,
   usedDataSources,
   indexesWithinAncestors,
@@ -359,6 +406,7 @@ export const generateJsxChildren = ({
   children: Instance["children"];
   instances: Instances;
   props: Props;
+  resources?: Resources;
   dataSources: DataSources;
   usedDataSources: DataSources;
   indexesWithinAncestors: IndexesWithinAncestors;
@@ -386,7 +434,7 @@ export const generateJsxChildren = ({
         usedDataSources,
         scope,
       });
-      generatedChildren = `{${expression}}\n`;
+      generatedChildren += `{renderText(${expression})}\n`;
       continue;
     }
     if (child.type === "id") {
@@ -402,6 +450,7 @@ export const generateJsxChildren = ({
         tagsOverrides,
         instance,
         props,
+        resources,
         dataSources,
         usedDataSources,
         indexesWithinAncestors,
@@ -414,6 +463,7 @@ export const generateJsxChildren = ({
           children: instance.children,
           instances,
           props,
+          resources,
           dataSources,
           usedDataSources,
           indexesWithinAncestors,
@@ -434,6 +484,7 @@ export const generateWebstudioComponent = ({
   parameters,
   instances,
   props,
+  resources,
   dataSources,
   metas,
   tagsOverrides,
@@ -445,6 +496,7 @@ export const generateWebstudioComponent = ({
   parameters: Extract<Prop, { type: "parameter" }>[];
   instances: Instances;
   props: Props;
+  resources?: Resources;
   dataSources: DataSources;
   classesMap: Map<string, Array<string>>;
   metas: Map<Instance["component"], WsComponentMeta>;
@@ -469,6 +521,7 @@ export const generateWebstudioComponent = ({
       tagsOverrides,
       instance,
       props,
+      resources,
       dataSources,
       usedDataSources,
       indexesWithinAncestors,
@@ -480,6 +533,7 @@ export const generateWebstudioComponent = ({
         children: instance.children,
         instances,
         props,
+        resources,
         dataSources,
         usedDataSources,
         indexesWithinAncestors,

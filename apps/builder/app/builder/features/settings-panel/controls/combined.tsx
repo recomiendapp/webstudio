@@ -9,9 +9,11 @@ import { FileControl } from "./file";
 import { UrlControl } from "./url";
 import type { ControlProps } from "../shared";
 import { JsonControl } from "./json";
+import { JsonCodeControl } from "./json-code";
 import { TextContent } from "./text-content";
 import { ResourceControl } from "./resource-control";
 import { TagControl } from "./tag-control";
+import { TimeZoneControl } from "./time-zone";
 
 export const renderControl = ({
   meta,
@@ -29,7 +31,9 @@ export const renderControl = ({
     return <TagControl key={key} meta={meta} prop={prop} {...rest} />;
   }
 
-  // never render parameter props
+  // Parameters are internal scoped runtime values, not direct user-authored
+  // prop values. Builder can preserve/use them where already in scope, but the
+  // normal props panel must not expose them as editable controls.
   if (prop?.type === "parameter") {
     return;
   }
@@ -45,6 +49,10 @@ export const renderControl = ({
 
   if (meta.control === "json") {
     return <JsonControl key={key} meta={meta} prop={prop} {...rest} />;
+  }
+
+  if (meta.control === "json-code") {
+    return <JsonCodeControl key={key} meta={meta} prop={prop} {...rest} />;
   }
 
   if (meta.control === "text") {
@@ -96,6 +104,10 @@ export const renderControl = ({
 
   if (meta.control === "select") {
     return <SelectControl key={key} meta={meta} prop={prop} {...rest} />;
+  }
+
+  if (meta.control === "timeZone") {
+    return <TimeZoneControl key={key} meta={meta} prop={prop} {...rest} />;
   }
 
   if (meta.control === "file") {

@@ -1,9 +1,36 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 
-import { Links, Meta, Outlet, useMatches } from "react-router";
+import {
+  type HeadersFunction,
+  type LoaderFunctionArgs,
+  Links,
+  Meta,
+  Outlet,
+  useMatches,
+} from "react-router";
+import { redirectRequest } from "./redirect-url";
 // @todo think about how to make __generated__ typeable
 // @ts-ignore
-import { CustomCode, projectId, lastPublished } from "./__generated__/_index";
+import { CustomCode, projectId, projectVersion, lastPublished } from "./__generated__/_index";
+// @ts-ignore
+import { redirects } from "./__generated__/$resources.redirects";
+
+export const loader = ({ request }: LoaderFunctionArgs) => {
+  const redirectResponse = redirectRequest(request, redirects);
+  if (redirectResponse !== undefined) {
+    return redirectResponse;
+  }
+
+  return null;
+};
+
+export const headers: HeadersFunction = ({ errorHeaders }) => {
+  if (errorHeaders) {
+    return errorHeaders;
+  }
+
+  return {};
+};
 
 const Root = () => {
   // Get language from matches
@@ -22,6 +49,7 @@ const Root = () => {
     <html
       lang={lang}
       data-ws-project={projectId}
+      data-ws-version={projectVersion}
       data-ws-last-published={lastPublished}
     >
       <head>

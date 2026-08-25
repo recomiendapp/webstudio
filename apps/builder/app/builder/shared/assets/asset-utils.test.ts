@@ -1,72 +1,22 @@
 import { expect, test, describe } from "vitest";
 import {
-  parseAssetName,
-  formatAssetName,
   getImageNameAndType,
   getSha256Hash,
-  detectAssetType,
+  getFileUploadFingerprint,
   uploadingFileDataToAsset,
 } from "./asset-utils";
-import type { Asset } from "@webstudio-is/sdk";
 
-describe("parseAssetName", () => {
-  test("parses name with hash and extension", () => {
-    expect(parseAssetName("hello_hash.ext")).toEqual({
-      basename: "hello",
-      hash: "hash",
-      ext: "ext",
-    });
-  });
+test("distinguishes upload fingerprints by filename and content", async () => {
+  const first = new File([""], "first.md");
+  const renamed = new File([""], "renamed.md");
+  const changed = new File(["changed"], "first.md");
 
-  test("parses name without hash", () => {
-    expect(parseAssetName("hello.ext")).toEqual({
-      basename: "hello",
-      hash: "",
-      ext: "ext",
-    });
-  });
+  const firstFingerprint = await getFileUploadFingerprint(first);
+  const renamedFingerprint = await getFileUploadFingerprint(renamed);
+  const changedFingerprint = await getFileUploadFingerprint(changed);
 
-  test("parses name with multiple underscores", () => {
-    expect(parseAssetName("hello_hash1.ext_hash2")).toEqual({
-      basename: "hello",
-      hash: "hash1",
-      ext: "ext_hash2",
-    });
-  });
-
-  test("parses name with hash but no extension", () => {
-    expect(parseAssetName("hello_hash1_hash2")).toEqual({
-      basename: "hello_hash1",
-      hash: "hash2",
-      ext: "",
-    });
-  });
-});
-
-describe("formatAssetName", () => {
-  test("formats asset with filename", () => {
-    const asset: Pick<Asset, "name" | "filename"> = {
-      name: "uploaded_abc123.jpg",
-      filename: "myimage",
-    };
-    expect(formatAssetName(asset)).toBe("myimage.jpg");
-  });
-
-  test("formats asset without filename", () => {
-    const asset: Pick<Asset, "name" | "filename"> = {
-      name: "uploaded_abc123.jpg",
-      filename: undefined,
-    };
-    expect(formatAssetName(asset)).toBe("uploaded.jpg");
-  });
-
-  test("formats asset with no extension", () => {
-    const asset: Pick<Asset, "name" | "filename"> = {
-      name: "uploaded_abc123",
-      filename: "document",
-    };
-    expect(formatAssetName(asset)).toBe("document.");
-  });
+  expect(firstFingerprint).not.toBe(renamedFingerprint);
+  expect(firstFingerprint).not.toBe(changedFingerprint);
 });
 
 describe("getImageNameAndType", () => {
@@ -143,56 +93,24 @@ describe("getSha256Hash", () => {
   });
 });
 
-describe("detectAssetType", () => {
-  test("detects image files", () => {
-    expect(detectAssetType("photo.jpg")).toBe("image");
-    expect(detectAssetType("image.png")).toBe("image");
-    expect(detectAssetType("graphic.gif")).toBe("image");
-    expect(detectAssetType("vector.svg")).toBe("image");
-    expect(detectAssetType("picture.webp")).toBe("image");
-  });
-
-  test("detects font files", () => {
-    expect(detectAssetType("font.woff")).toBe("font");
-    expect(detectAssetType("font.woff2")).toBe("font");
-    expect(detectAssetType("font.ttf")).toBe("font");
-    expect(detectAssetType("font.otf")).toBe("font");
-  });
-
-  test("detects video files", () => {
-    expect(detectAssetType("video.mp4")).toBe("video");
-    expect(detectAssetType("video.webm")).toBe("video");
-    expect(detectAssetType("video.mov")).toBe("video");
-    expect(detectAssetType("video.avi")).toBe("video");
-  });
-
-  test("returns file for other types", () => {
-    expect(detectAssetType("document.pdf")).toBe("file");
-    expect(detectAssetType("audio.mp3")).toBe("file");
-    expect(detectAssetType("data.json")).toBe("file");
-    expect(detectAssetType("doc.docx")).toBe("file");
-  });
-
-  test("is case-insensitive", () => {
-    expect(detectAssetType("PHOTO.JPG")).toBe("image");
-    expect(detectAssetType("FONT.WOFF2")).toBe("font");
-    expect(detectAssetType("VIDEO.MP4")).toBe("video");
-    expect(detectAssetType("DOC.PDF")).toBe("file");
-  });
-
-  test("handles files without extension", () => {
-    expect(detectAssetType("filename")).toBe("file");
-  });
-
-  test("handles files with multiple dots", () => {
-    expect(detectAssetType("my.photo.file.png")).toBe("image");
-    expect(detectAssetType("my.font.file.woff2")).toBe("font");
-    expect(detectAssetType("my.video.file.mp4")).toBe("video");
-    expect(detectAssetType("my.doc.file.pdf")).toBe("file");
-  });
-});
-
 describe("uploadingFileDataToAsset", () => {
+  test("preserves the upload destination folder in the preview asset", () => {
+    const result = uploadingFileDataToAsset({
+      source: "file",
+      file: new File(["content"], "document.pdf", {
+        type: "application/pdf",
+      }),
+      assetId: "test-id",
+      fingerprintId: "test-fingerprint",
+      uploadName: "test-upload-name",
+      type: "file",
+      objectURL: "blob:test",
+      folderId: "folder-id",
+    });
+
+    expect(result.folderId).toBe("folder-id");
+  });
+
   test("extracts format from MIME type for font with valid MIME", () => {
     const file = new File(["content"], "InterVariable.woff2", {
       type: "font/woff2",
@@ -201,6 +119,8 @@ describe("uploadingFileDataToAsset", () => {
       source: "file",
       file,
       assetId: "test-id",
+      fingerprintId: "test-fingerprint",
+      uploadName: "test-upload-name",
       type: "font",
       objectURL: "blob:test",
     });
@@ -221,6 +141,8 @@ describe("uploadingFileDataToAsset", () => {
       source: "file",
       file,
       assetId: "test-id",
+      fingerprintId: "test-fingerprint",
+      uploadName: "test-upload-name",
       type: "font",
       objectURL: "blob:test",
     });
@@ -241,6 +163,8 @@ describe("uploadingFileDataToAsset", () => {
       source: "file",
       file,
       assetId: "test-id",
+      fingerprintId: "test-fingerprint",
+      uploadName: "test-upload-name",
       type: "image",
       objectURL: "blob:test",
     });
@@ -261,6 +185,8 @@ describe("uploadingFileDataToAsset", () => {
       source: "file",
       file,
       assetId: "test-id",
+      fingerprintId: "test-fingerprint",
+      uploadName: "test-upload-name",
       type: "video",
       objectURL: "blob:test",
     });
@@ -269,7 +195,11 @@ describe("uploadingFileDataToAsset", () => {
       id: "test-id",
       name: "video.mp4",
       format: "mp4",
-      type: "image", // Videos are treated as images for now
+      type: "video",
+      meta: {
+        width: Number.NaN,
+        height: Number.NaN,
+      },
     });
   });
 
@@ -281,6 +211,8 @@ describe("uploadingFileDataToAsset", () => {
       source: "file",
       file,
       assetId: "test-id",
+      fingerprintId: "test-fingerprint",
+      uploadName: "test-upload-name",
       type: "file",
       objectURL: "blob:test",
     });
@@ -301,6 +233,8 @@ describe("uploadingFileDataToAsset", () => {
       source: "file",
       file,
       assetId: "test-id",
+      fingerprintId: "test-fingerprint",
+      uploadName: "test-upload-name",
       type: "font",
       objectURL: "blob:test",
     });
@@ -321,6 +255,8 @@ describe("uploadingFileDataToAsset", () => {
       source: "file",
       file,
       assetId: "test-id",
+      fingerprintId: "test-fingerprint",
+      uploadName: "test-upload-name",
       type: "file",
       objectURL: "blob:test",
     });

@@ -12,7 +12,7 @@ const debug = createDebug(import.meta.url);
 // Endpoint to force user relogin
 export const loader: LoaderFunction = async ({ request }) => {
   if (false === isBuilder(request)) {
-    debug(`Request url is not the builder URL ${request.url}`);
+    debug("Request url is not the builder URL");
 
     return new Response("Only builder URL is allowed", {
       status: 404,
@@ -23,10 +23,6 @@ export const loader: LoaderFunction = async ({ request }) => {
     preventCrossOriginCookie(request);
     allowedDestinations(request, ["document"]);
     // CSRF is not needed for document only routes
-
-    debug(
-      "Authenticate request received, starting authentication and authorization process"
-    );
 
     return await builderAuthenticator.authenticate("ws", request, {
       throwOnError: true,
@@ -39,10 +35,13 @@ export const loader: LoaderFunction = async ({ request }) => {
         const response = new Response(noStoreResponse.body, noStoreResponse);
 
         const url = new URL(request.url);
-        let returnTo = url.searchParams.get("returnTo");
+        const isAuthRoute = url.pathname === "/auth/ws";
+        let returnTo = isAuthRoute
+          ? url.searchParams.get("returnTo")
+          : `${url.pathname}${url.search}`;
 
         if (returnTo !== null) {
-          if (comparePathnames(returnTo, request.url)) {
+          if (isAuthRoute && comparePathnames(returnTo, request.url)) {
             // avoid loops
             returnTo = "/";
           }

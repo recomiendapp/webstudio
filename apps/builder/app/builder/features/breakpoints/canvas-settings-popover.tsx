@@ -11,7 +11,7 @@ import {
   Text,
 } from "@webstudio-is/design-system";
 import { WidthInput } from "./width-input";
-import { minCanvasWidth } from "~/shared/breakpoints";
+import { minCanvasWidth } from "~/shared/breakpoints-utils";
 import { $canvasWidth, $scale } from "~/builder/shared/nano-states";
 import { $selectedBreakpoint } from "~/shared/nano-states";
 import { ChevronDownIcon } from "@webstudio-is/icons";
@@ -46,7 +46,6 @@ export const CanvasSettingsPopover = () => {
         </ToolbarButton>
       </PopoverTrigger>
       <PopoverContent
-        sideOffset={0}
         collisionPadding={4}
         align="start"
         css={{ width: theme.spacing[30] }}

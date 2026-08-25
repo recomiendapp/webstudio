@@ -1,0 +1,83 @@
+# MCP Vision Verification
+
+## Generated App Dependency Notes
+
+- `preview.start` and `webstudio preview` install generated app dependencies under `.webstudio/preview` and reuse them across regenerations.
+- Session previews download missing project assets into `.webstudio/assets`. If `PREVIEW_ASSET_DOWNLOAD_FAILED` occurs, restore network and project asset access, then retry `preview.start`.
+- Dependency installation honors `npm_config_cache`, including a caller-provided writable cache on Windows.
+- Do not add generated-preview dependencies to the repository root `package.json` or `pnpm-lock.yaml`.
+- If dependency installation fails, the error includes sanitized npm diagnostics. Check the reported npm and network configuration, then reinstall or update the Webstudio CLI if the problem persists.
+
+## Visual Verification Rule
+
+Ask the user whether they want visual verification before starting it, unless the user explicitly requested screenshots, visual verification, or a rendered audit. Never start `preview.start`, `screenshot`, `screenshot.diff`, `vision.install-ocr`, or a rendered audit automatically. If the user does not opt in, use focused non-visual assertions and report that vision was not run. After the user opts in, use `preview.start` and `screenshot({ path })` so vision can inspect the current MCP session and verify that generated project files are current. Iterative preview is the default: it keeps one generated-site server and browser alive, regenerates changed files, and performs an ordinary page reload without Vite HMR. Use `mode: "production"` only for release-like verification; rendered audit selects it automatically. `preview.start` is long-lived and cannot be used through one-shot `mcp single-op-call`; from a shell, use `webstudio mcp run` for preview.start/screenshot/preview.stop in one shared process, or use a long-running MCP server. When a baseline exists, use screenshot.diff to get pixel regions, OCR text changes, and diff PNG artifacts.
+
+An authenticated project share URL is used with `webstudio init --link`; it is
+not a generated-site preview URL. Project screenshots and rendered audits use
+the generated local preview owned by the current CLI/MCP process. Do not pass a
+Builder/share URL to `screenshot`, even without query parameters. Use `path`
+after starting preview, or use `baseUrl` only for an intentional generated site
+that is already running. Path captures verify the generated-site root marker
+and fail instead of returning a screenshot of Builder chrome.
+
+## Vision Verification Loop
+
+- Ask the user whether they want visual verification unless they explicitly requested it. Stop before calling preview, capture, comparison, OCR, or rendered-audit tools until the user opts in.
+- Make focused page/content/style changes with semantic MCP tools.
+- Call preview.start once to keep the iterative generated site running. In shell-driven workflows, run preview.start, screenshot, and preview.stop inside one `webstudio mcp run` call so they share the same preview owner.
+- Read `preview.status.stale` before relying on generated output. When present, `renderedProjectVersion` identifies the last project version materialized into the preview; a stale preview refreshes automatically on the next managed screenshot or `preview.start` call.
+- {{dependency-notes}}
+- After MCP mutations, path-based screenshots regenerate the current session in place, wait for its exact project version, and normally reload the route. The server and browser remain alive. From one-shot shell calls or another process, pass `baseUrl` with `path` to capture an already-running generated site without starting it. Use preview.stop only in the same long-running MCP server or `webstudio mcp run` process that started preview; a separate one-shot `single-op-call` process does not own another process's preview controller.
+- For multi-page work, capture each changed page by path through the same preview server, for example screenshot({ path: "/" }), screenshot({ path: "/pricing" }), and screenshot({ path: "/about" }). The screenshot tool navigates directly to the requested route; no browser click navigation is required.
+- For responsive work, call list-breakpoints first, then capture screenshots at viewport widths based on the Builder breakpoints plus a narrow mobile and desktop width.
+- Call screenshot with { path: "/" } or the changed page path and viewport such as { width: 375, height: 812 } and { width: 1440, height: 900 }. For an existing preview in another process, call screenshot with { baseUrl: "http://127.0.0.1:5177", path: "/" }. Use waitForSelector when the page has a reliable ready marker, waitUntil:"networkidle" for network-heavy pages, and waitForTimeout only for final visual settling.
+- An explicit occupied `port` fails immediately with `PREVIEW_PORT_IN_USE`. To capture a generated site already running in another process, pass its `baseUrl` with `path`; otherwise choose another port.
+- Automatic browser discovery checks system installations, configured browser paths, and Chromium installations in the Playwright browser cache.
+- The screenshot timeout bounds browser capture after the preview is ready. A timeout returns `SCREENSHOT_TIMEOUT`, resets the reusable browser session, and releases the shared preview lifecycle for cleanup.
+- {{diff}} When a baseline PNG exists, call screenshot.diff with baselinePath, currentPath, and outputDir for each page/viewport pair. Add expectedText when a specific visible phrase must be present; its assertions report pass/fail plus found and missing text. Add expectedVisual to set pass/fail limits for mismatch percentage, the number of changed regions, or an overall dominant color/brightness direction.
+- {{diff}} Read screenshot.diff textAnalysis: it reports OCR status plus text that appeared, disappeared, moved, changed content, or changed font/style geometry. If OCR is unavailable, expectedText assertions fail and textAnalysis reports why; ask the user for permission to install Tesseract, then call vision.install-ocr with { "confirm": true }, or rely on visual inspection.
+- Inspect every viewport PNG and any diff artifacts with vision, then compare layout, OCR text evidence, color, spacing, imagery, and responsive framing against the user intent.
+- If the screenshot does not match, apply another focused mutation and repeat screenshot verification.
+
+## Workflow Summary With Diff
+
+After the user explicitly requests or approves visual verification, call preview.start once to start the iterative generated-site preview, then screenshot({ path, viewport }) after focused mutations; path screenshots regenerate changed files and reload the route in the existing server and browser. For responsive work, use list-breakpoints and capture each changed page at Builder breakpoint widths plus mobile and desktop widths. Use screenshot.diff on each baseline/current page or viewport pair when a baseline exists, then inspect pixel regions, OCR textAnalysis, and PNG/diff artifacts with vision before finishing. Use mode: "production" only for release-like verification.
+
+## Workflow Summary Without Diff
+
+After the user explicitly requests or approves visual verification, call preview.start once to start the iterative generated-site preview, then screenshot({ path, viewport }) after focused mutations; path screenshots regenerate changed files and reload the route in the existing server and browser. For responsive work, use list-breakpoints and capture each changed page at Builder breakpoint widths plus mobile and desktop widths. Inspect every PNG with vision before finishing. Use mode: "production" only for release-like verification.
+
+Each screenshot result includes rendered `layout` metrics when the local browser
+provides them. `layout.horizontalOverflow: true` is deterministic evidence that
+the rendered document exceeds the requested viewport width. Use vision for
+clipping, wrapping, hierarchy, and other judgments that layout dimensions alone
+cannot establish.
+
+Pass `includeImageMetrics: true` when an ordinary screenshot needs
+`layout.images`; rendered audit enables it automatically. The array includes
+each rendered image's Webstudio instance id when available, loading mode,
+completion state, natural dimensions, rendered dimensions, and document
+position. Rendered audits use this evidence to report broken images, eager
+loading below the fold, and sources more than 2x the rendered dimensions in
+both axes. Oversized-source results are optimization evidence, not universal
+performance conformance.
+
+Pass `includeResourceMetrics: true` when an ordinary screenshot needs sanitized
+Resource Timing evidence; rendered audit enables it automatically. Resource
+metrics contain only the URL pathname, initiator type, transfer/body sizes,
+duration, and browser-provided render-blocking status. Origins and query strings
+are omitted. Rendered audits report explicitly blocking resources and legacy
+`.ttf`, `.otf`, or `.woff` font files without applying a universal byte-size
+budget.
+
+## Screenshot Verification Summary
+
+After the user explicitly requests or approves visual verification, call preview.start once inside a long-running MCP server, then use screenshot({ path, viewport }) for fast repeated checks across multiple pages. Iterative mode is the default: after MCP mutations, path screenshots regenerate changed files and reload the requested route while keeping the server and browser alive. Use mode: "production" only for release-like verification. From one-shot shell calls or another process, use screenshot({ baseUrl, path, viewport }) to capture an already-running preview/site without generating, building, starting, or restarting preview. Use path values such as "/", "/pricing", or "/about" to capture specific generated routes. For responsive work, read list-breakpoints and capture one familiar device viewport inside each Builder breakpoint range before using vision. Screenshot waits for load by default, then fonts and two layout frames; pass waitForSelector for app readiness, waitUntil:"networkidle" for network-heavy pages, and waitForTimeout for final settling. When a baseline exists, use screenshot.diff for changed regions, OCR textAnalysis, and diff artifacts on each baseline/current screenshot pair. Outside MCP, use `webstudio screenshot --path /pricing --output pricing.png` for one temporary generated preview capture, or keep `webstudio preview` running and pass its absolute URL to `webstudio screenshot` for repeated captures.
+
+## Screenshot Diff Evidence
+
+- Pixel evidence: total mismatch, changed regions, dominant color/luminance direction, diffPath, and contextDiffPath.
+- OCR evidence: textAnalysis.status, provider, and changes for appeared/disappeared/content_changed/moved/font_changed text. expectedText adds pass/fail assertions plus found and missing current-screen text. expectedVisual adds pass/fail quantitative checks for mismatch percentage, changed-region count, and the overall dominant color/brightness direction.
+- OCR dependency: screenshot.diff uses the system tesseract binary when available. If missing, it returns ocr_unavailable_tesseract_not_found_or_failed and still returns pixel evidence.
+- OCR install: MCP cannot prompt. Ask the user first; if they agree, call vision.install-ocr with { "confirm": true }. If automatic install is unavailable, follow the returned installUrl.
+- Final judgment: OCR and pixel diff are evidence. A vision-capable model must still inspect screenshots/diff artifacts and compare the rendered result to user intent.

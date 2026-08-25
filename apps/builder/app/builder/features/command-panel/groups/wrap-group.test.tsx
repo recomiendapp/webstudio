@@ -4,17 +4,13 @@ import * as baseMetas from "@webstudio-is/sdk-components-react/metas";
 import * as animationMetas from "@webstudio-is/sdk-components-animation/metas";
 import { createDefaultPages } from "@webstudio-is/project-build";
 import { $, renderData } from "@webstudio-is/template";
-import {
-  $instances,
-  $pages,
-  $props,
-  $registeredComponentMetas,
-} from "~/shared/nano-states";
+import { $registeredComponentMetas } from "~/shared/nano-states";
+import { $instances } from "~/shared/sync/data-stores";
+import { $pages, $props } from "~/shared/sync/data-stores";
 import { registerContainers } from "~/shared/sync/sync-stores";
-import { $awareness, selectInstance } from "~/shared/awareness";
-import { __testing__ } from "./wrap-group";
-
-const { canWrapInstance } = __testing__;
+import { $selectedPageId } from "~/shared/nano-states";
+import { selectInstance } from "~/shared/nano-states";
+import { canWrapInstance } from "@webstudio-is/project-build/runtime";
 
 registerContainers();
 
@@ -25,7 +21,7 @@ const metas = new Map(
 beforeEach(() => {
   $registeredComponentMetas.set(metas);
   $pages.set(createDefaultPages({ rootInstanceId: "" }));
-  $awareness.set({ pageId: "" });
+  $selectedPageId.set("");
 });
 
 describe("canWrapInstance for components", () => {
@@ -98,20 +94,19 @@ describe("canWrapInstance for components", () => {
     expect(result).toBe(true);
   });
 
-  test("should reject invalid wrapping (text in CodeText)", () => {
+  test("should allow wrapping text in a legacy CodeText", () => {
     $instances.set(
       renderData(
         <$.Body ws:id="body">
-          <$.Box ws:id="box"></$.Box>
+          <$.Text ws:id="text">Hello</$.Text>
         </$.Body>
       ).instances
     );
-    selectInstance(["box", "body"]);
+    selectInstance(["text", "body"]);
 
-    // CodeText only accepts text content, not boxes
     const result = canWrapInstance(
-      "box",
-      ["box", "body"],
+      "text",
+      ["text", "body"],
       "body",
       "CodeText",
       undefined,
@@ -119,7 +114,7 @@ describe("canWrapInstance for components", () => {
       $props.get(),
       $registeredComponentMetas.get()
     );
-    expect(result).toBe(false);
+    expect(result).toBe(true);
   });
 });
 
@@ -405,6 +400,46 @@ describe("canWrapInstance edge cases", () => {
       $props.get(),
       $registeredComponentMetas.get()
     );
+    expect(result).toBe(true);
+  });
+
+  test("should use provided html tag index when validating wrapper in parent", () => {
+    $instances.set(
+      new Map([
+        [
+          "list",
+          {
+            type: "instance",
+            id: "list",
+            component: elementComponent,
+            children: [{ type: "id", value: "box" }],
+          },
+        ],
+        [
+          "box",
+          {
+            type: "instance",
+            id: "box",
+            component: elementComponent,
+            tag: "div",
+            children: [],
+          },
+        ],
+      ])
+    );
+
+    const result = canWrapInstance(
+      "box",
+      ["box", "list"],
+      "list",
+      elementComponent,
+      "li",
+      $instances.get(),
+      new Map(),
+      $registeredComponentMetas.get(),
+      new Map([["list", "ul"]])
+    );
+
     expect(result).toBe(true);
   });
 });

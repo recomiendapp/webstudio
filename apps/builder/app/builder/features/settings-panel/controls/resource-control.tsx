@@ -1,9 +1,7 @@
-import { nanoid } from "nanoid";
 import { computed } from "nanostores";
 import {
   forwardRef,
   useId,
-  useMemo,
   useRef,
   useState,
   type ComponentProps,
@@ -19,33 +17,32 @@ import {
   NestedInputButton,
   theme,
 } from "@webstudio-is/design-system";
-import { isLiteralExpression, Resource, type Prop } from "@webstudio-is/sdk";
+import { isLiteralExpression } from "@webstudio-is/expression";
+import type { Resource } from "@webstudio-is/sdk";
+import { BindableExpressionControl } from "~/builder/shared/bindable-expression";
+import { validatePrimitiveValue } from "@webstudio-is/project-build/runtime";
+import { $variableValuesByInstanceSelector } from "~/shared/nano-states";
+import { $dataSources } from "~/shared/sync/data-stores";
+import { $props, $resources } from "~/shared/sync/data-stores";
 import {
-  BindingControl,
-  BindingPopover,
-  type BindingVariant,
-} from "~/builder/shared/binding-popover";
-import {
-  $dataSources,
-  $props,
-  $resources,
-  $variableValuesByInstanceSelector,
-} from "~/shared/nano-states";
-import { computeExpression } from "~/shared/data-variables";
-import { updateWebstudioData } from "~/shared/instance-utils";
+  computeExpression,
+  createResourceFieldsFromResource,
+  createResourceValueFromFormData,
+} from "@webstudio-is/project-build/runtime";
+import { executeRuntimeMutation } from "~/shared/instance-utils/data";
 import {
   $selectedInstance,
   $selectedInstanceKeyWithRoot,
   $selectedPage,
-} from "~/shared/awareness";
+} from "~/shared/nano-states";
 import {
   UrlField,
   MethodField,
   Headers,
-  parseResource,
   getResourceScopeForInstance,
 } from "../resource-panel";
-import { type ControlProps, useLocalValue, VerticalLayout } from "../shared";
+import { useDraftValue } from "~/builder/shared/use-draft-value";
+import { type ControlProps, VerticalLayout } from "../shared";
 import { PropertyLabel } from "../property-label";
 
 // dirty, dirty hack
@@ -186,8 +183,8 @@ const ResourceControlPanel = ({
             event.preventDefault();
             if (event.currentTarget.checkValidity()) {
               const formData = new FormData(event.currentTarget);
-              const newResource = parseResource({
-                id: resource?.id ?? nanoid(),
+              const newResource = createResourceValueFromFormData({
+                id: resource?.id ?? "",
                 name: resource?.name ?? propName,
                 formData,
               });
@@ -255,10 +252,8 @@ export const ResourceControl = ({
       urlExpression = resource.url;
     }
   }
-  // create temporary resource
-  const resourceId = useMemo(() => resource?.id ?? nanoid(), [resource]);
   resource ??= {
-    id: resourceId,
+    id: "",
     name: propName,
     url: urlExpression,
     method: methodPropValue,
@@ -266,78 +261,67 @@ export const ResourceControl = ({
   };
 
   const updateResource = (newResource: Resource) => {
-    updateWebstudioData((data) => {
-      if (prop?.type === "resource") {
-        data.resources.set(newResource.id, newResource);
-      } else {
-        const newProp: Prop = {
-          id: prop?.id ?? nanoid(),
-          instanceId,
-          name: propName,
-          type: "resource",
-          value: newResource.id,
-        };
-        data.props.set(newProp.id, newProp);
-        data.resources.set(newResource.id, newResource);
-      }
+    executeRuntimeMutation({
+      id: "resources.upsertProp",
+      input: {
+        resourceId: prop?.type === "resource" ? newResource.id : undefined,
+        resource: createResourceFieldsFromResource(newResource),
+        instanceId,
+        propName,
+        scopeInstanceId: instanceId,
+        dataSourceName: newResource.name,
+      },
     });
   };
 
   const id = useId();
-  let variant: BindingVariant = "bound";
-  let readOnly = true;
-  if (isLiteralExpression(urlExpression)) {
-    variant = "default";
-    readOnly = false;
-  }
-  const localValue = useLocalValue(
+  const bound = isLiteralExpression(urlExpression) === false;
+  const localValue = useDraftValue(
     String(computeExpression(resource.url, variableValues) ?? ""),
     (value) => updateResource({ ...resource, url: JSON.stringify(value) })
   );
 
   return (
-    <VerticalLayout
-      label={<PropertyLabel name={propName} readOnly={readOnly} />}
-    >
-      <BindingControl>
-        <InputField
-          id={id}
-          disabled={readOnly}
-          value={localValue.value}
-          onChange={(event) => localValue.set(event.target.value)}
-          onBlur={localValue.save}
-          onSubmit={localValue.save}
-          suffix={
-            isFeatureEnabled("resourceProp") && (
-              <ResourceControlPanel
-                resource={resource}
-                propName={propName}
-                onChange={updateResource}
-              />
-            )
-          }
-        />
-        <BindingPopover
-          scope={scope}
-          aliases={aliases}
-          validate={(value) => {
-            if (value !== undefined && typeof value !== "string") {
-              return `Expected URL string value`;
+    <VerticalLayout label={<PropertyLabel name={propName} readOnly={bound} />}>
+      <BindableExpressionControl
+        expression={urlExpression}
+        value={localValue.value}
+        bound={bound}
+        scope={scope}
+        aliases={aliases}
+        validate={(value) => validatePrimitiveValue(value, "URL")}
+        onChangeValue={(value) =>
+          updateResource({ ...resource, url: JSON.stringify(value) })
+        }
+        onChangeExpression={(value) =>
+          updateResource({ ...resource, url: value })
+        }
+        onRemove={(value) =>
+          updateResource({
+            ...resource,
+            url: JSON.stringify(String(value)),
+          })
+        }
+        renderControl={({ readOnly }) => (
+          <InputField
+            id={id}
+            disabled={readOnly}
+            value={localValue.value}
+            onChange={(event) => localValue.set(event.target.value)}
+            onBlur={localValue.save}
+            onSubmit={localValue.save}
+            suffix={
+              isFeatureEnabled("resourceProp") && (
+                <ResourceControlPanel
+                  resource={resource}
+                  propName={propName}
+                  onChange={updateResource}
+                />
+              )
             }
-          }}
-          variant={variant}
-          value={urlExpression}
-          onChange={(newExpression) =>
-            updateResource({ ...resource, url: newExpression })
-          }
-          onRemove={(evaluatedValue) =>
-            updateResource({
-              ...resource,
-              url: JSON.stringify(String(evaluatedValue)),
-            })
-          }
-        />
-      </BindingControl>
+          />
+        )}
+      />
     </VerticalLayout>
   );
 };

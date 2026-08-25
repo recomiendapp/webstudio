@@ -35,8 +35,8 @@ import {
   PlusIcon,
 } from "@webstudio-is/icons";
 import {
-  scrollAnimationSchema,
-  viewAnimationSchema,
+  scrollAnimation,
+  viewAnimation,
   type AnimationAction,
   type ScrollAnimation,
   type ViewAnimation,
@@ -46,6 +46,7 @@ import { newViewAnimations } from "./new-view-animations";
 import { AnimationPanelContent } from "./animation-panel-content";
 import { CollapsibleSectionRoot } from "~/builder/shared/collapsible-section";
 import { z } from "zod";
+import { readClipboardText } from "~/shared/clipboard";
 
 const newAnimationsPerType: {
   scroll: ScrollAnimation[];
@@ -79,7 +80,7 @@ const serialize = (animations: (ScrollAnimation | ViewAnimation)[]) => {
 const parseViewAnimations = (text: string): ViewAnimation[] => {
   const data = JSON.parse(text);
   const parsed = z
-    .object({ [clipboardNamespace]: z.array(viewAnimationSchema) })
+    .object({ [clipboardNamespace]: z.array(viewAnimation) })
     .parse(data);
   return parsed[clipboardNamespace];
 };
@@ -87,7 +88,7 @@ const parseViewAnimations = (text: string): ViewAnimation[] => {
 const parseScrollAnimations = (text: string): ScrollAnimation[] => {
   const data = JSON.parse(text);
   const parsed = z
-    .object({ [clipboardNamespace]: z.array(scrollAnimationSchema) })
+    .object({ [clipboardNamespace]: z.array(scrollAnimation) })
     .parse(data);
   return parsed[clipboardNamespace];
 };
@@ -116,9 +117,11 @@ const AnimationContextMenu = ({
 
   const pasteAnimations = () => {
     const index = lastClickedAnimationIndex.current;
-    navigator.clipboard
-      .readText()
+    readClipboardText()
       .then((text) => {
+        if (text === undefined) {
+          return;
+        }
         if (action.type === "scroll") {
           const animations = parseScrollAnimations(text);
           const newAction = structuredClone(action);
@@ -229,7 +232,11 @@ export const AnimationsSelect = ({
                 {action}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <SectionTitleButton prefix={<PlusIcon />} tabIndex={0} />
+                    <SectionTitleButton
+                      aria-label="Add animation"
+                      prefix={<PlusIcon />}
+                      tabIndex={0}
+                    />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent
                     sideOffset={Number.parseFloat(rawTheme.spacing[5])}

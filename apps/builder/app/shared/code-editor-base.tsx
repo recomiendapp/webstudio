@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   Annotation,
+  EditorSelection,
   EditorState,
   StateEffect,
   type Extension,
@@ -55,6 +56,23 @@ const minHeightVar = "--ws-code-editor-min-height";
 const maxHeightVar = "--ws-code-editor-max-height";
 const maximizeIconVisibilityVar = "--ws-code-editor-maximize-icon-visibility";
 
+export const clampEditorSelection = (
+  selection: EditorSelection,
+  length: number
+) => {
+  return EditorSelection.create(
+    selection.ranges.map((range) =>
+      EditorSelection.range(
+        Math.min(range.anchor, length),
+        Math.min(range.head, length)
+      )
+    ),
+    selection.mainIndex
+  );
+};
+
+export const normalizeEditorValue = (value: undefined | string) => value ?? "";
+
 export const getCodeEditorCssVars = ({
   minHeight,
   maxHeight,
@@ -95,6 +113,13 @@ const editorContentStyle = css({
   "&:focus-within": {
     borderColor: theme.colors.borderFocus,
   },
+  '&[data-chromeless="true"]': {
+    borderRadius: 0,
+  },
+  '&[data-chromeless="true"]:not([data-invalid="true"]):is(:hover, :focus-within)':
+    {
+      borderColor: "transparent",
+    },
   '&[data-invalid="true"]': {
     borderColor: theme.colors.borderDestructiveMain,
     outlineColor: theme.colors.borderDestructiveMain,
@@ -166,7 +191,7 @@ const autocompletionTooltipTheme = EditorView.theme({
     padding: rawTheme.spacing[3],
   },
   ".cm-tooltip.cm-tooltip-autocomplete ul li": {
-    ...textVariants.labelsTitleCase,
+    ...textVariants.labels,
     textTransform: "none",
     position: "relative",
     display: "flex",
@@ -213,7 +238,36 @@ export const foldGutterExtension = foldGutter({
 
 export type EditorApi = {
   replaceSelection: (string: string) => void;
+  insertTemplate: (template: {
+    prefix: string;
+    suffix?: string;
+    placeholder: string;
+  }) => void;
   focus: () => void;
+};
+
+export const getTemplateInsertion = ({
+  from,
+  selectedText,
+  prefix,
+  suffix = "",
+  placeholder,
+}: {
+  from: number;
+  selectedText: string;
+  prefix: string;
+  suffix?: string;
+  placeholder: string;
+}) => {
+  const content = selectedText || placeholder;
+  const selectionFrom = from + prefix.length;
+  return {
+    text: `${prefix}${content}${suffix}`,
+    selection: EditorSelection.range(
+      selectionFrom,
+      selectionFrom + content.length
+    ),
+  };
 };
 
 type EditorContentProps = {
@@ -223,7 +277,8 @@ type EditorContentProps = {
   autoFocus?: boolean;
   invalid?: boolean;
   showShortcuts?: boolean;
-  value: string;
+  chromeless?: boolean;
+  value?: string;
   onChange: (value: string) => void;
   onChangeComplete: (value: string) => void;
 };
@@ -235,6 +290,7 @@ export const EditorContent = ({
   autoFocus = false,
   invalid = false,
   showShortcuts = false,
+  chromeless = false,
   value,
   onChange,
   onChangeComplete,
@@ -369,14 +425,16 @@ export const EditorContent = ({
     if (view === undefined) {
       return;
     }
+    const nextValue = normalizeEditorValue(value);
     // prevent updating when editor has the same state
     // and can be the source of new value
-    if (value === view.state.doc.toString()) {
+    if (nextValue === view.state.doc.toString()) {
       return;
     }
 
     view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: value },
+      changes: { from: 0, to: view.state.doc.length, insert: nextValue },
+      selection: clampEditorSelection(view.state.selection, nextValue.length),
       annotations: [ExternalChange.of(true)],
     });
   }, [value]);
@@ -391,6 +449,25 @@ export const EditorContent = ({
       view.dispatch(view.state.replaceSelection(string));
       view.focus();
     },
+    insertTemplate({ prefix, suffix, placeholder }) {
+      const view = viewRef.current;
+      if (view === undefined) {
+        return;
+      }
+      const { from, to } = view.state.selection.main;
+      const insertion = getTemplateInsertion({
+        from,
+        selectedText: view.state.doc.sliceString(from, to),
+        prefix,
+        suffix,
+        placeholder,
+      });
+      view.dispatch({
+        changes: { from, to, insert: insertion.text },
+        selection: insertion.selection,
+      });
+      view.focus();
+    },
     focus() {
       viewRef.current?.focus();
     },
@@ -400,6 +477,7 @@ export const EditorContent = ({
     <div
       className={editorContentStyle()}
       data-invalid={invalid}
+      data-chromeless={chromeless ? "true" : undefined}
       ref={editorRef}
     >
       {showShortcuts && (
@@ -450,6 +528,7 @@ export const EditorDialog = ({
   placement = "center",
   width = 640,
   height = 480,
+  contentPadding = true,
   ...panelProps
 }: {
   title: ReactNode;
@@ -457,6 +536,7 @@ export const EditorDialog = ({
   children: ReactNode;
   width?: number;
   height?: number;
+  contentPadding?: boolean;
   placement?: ComponentProps<typeof FloatingPanel>["placement"];
   resize?: ComponentProps<typeof FloatingPanel>["resize"];
   open?: boolean;
@@ -474,7 +554,7 @@ export const EditorDialog = ({
         <Grid
           align="stretch"
           css={{
-            padding: theme.panel.padding,
+            padding: contentPadding ? theme.panel.padding : 0,
             height: "100%",
             overflow: "hidden",
             boxSizing: "content-box",

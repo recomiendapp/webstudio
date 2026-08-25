@@ -1,3 +1,5 @@
+import { findAllNavigableTextInstanceSelectors } from "@webstudio-is/project-build/runtime";
+import { color } from "@webstudio-is/css-engine";
 import {
   useState,
   useEffect,
@@ -28,8 +30,7 @@ import {
   KEY_ARROW_LEFT_COMMAND,
   $createRangeSelection,
   COMMAND_PRIORITY_CRITICAL,
-  $getNearestNodeFromDOMNode,
-  // eslint-disable-next-line camelcase
+  $getNearestNodeFromDOMNode, // eslint-disable-next-line camelcase
   $normalizeSelection__EXPERIMENTAL,
   type LexicalEditor,
   type SerializedEditorState,
@@ -53,51 +54,51 @@ import { nanoid } from "nanoid";
 import { createRegularStyleSheet } from "@webstudio-is/css-engine";
 import type { Instance, Instances, Props } from "@webstudio-is/sdk";
 import {
-  collapsedAttribute,
+  inflatedAttribute,
   idAttribute,
   selectorIdAttribute,
 } from "@webstudio-is/react-sdk";
-import { isDescendantOrSelf, type InstanceSelector } from "~/shared/tree-utils";
+import {
+  isDescendantOrSelf,
+  type InstanceSelector,
+} from "@webstudio-is/project-build/runtime";
+import { builderRuntimeContext } from "@webstudio-is/project-build/runtime";
 import { ToolbarConnectorPlugin } from "./toolbar-connector";
 import { type Refs, $convertToLexical, $convertToUpdates } from "./interop";
-import Color from "colorjs.io";
 import { useEffectEvent } from "~/shared/hook-utils/effect-event";
-import {
-  deleteInstanceMutable,
-  findAllEditableInstanceSelector,
-  updateWebstudioData,
-} from "~/shared/instance-utils";
+import { deleteInstanceBySelector } from "~/shared/instance-utils/mutation";
 import {
   $blockChildOutline,
   $hoveredInstanceOutline,
   $hoveredInstanceSelector,
-  $instances,
   $registeredComponentMetas,
-  $selectedInstanceSelector,
   $textEditingInstanceSelector,
   $textEditorContextMenu,
   execTextEditorContextMenuCommand,
-  findBlockChildSelector,
-  findTemplates,
 } from "~/shared/nano-states";
+import { $instances } from "~/shared/sync/data-stores";
+import {
+  findBlockChildSelector,
+  findBlockTemplates,
+} from "@webstudio-is/project-build/runtime";
 import {
   getElementByInstanceSelector,
   getVisibleElementsByInstanceSelector,
 } from "~/shared/dom-utils";
 import deepEqual from "fast-deep-equal";
-import { setDataCollapsed } from "~/canvas/collapsed";
+import { inflateInstance } from "~/canvas/inflator";
 import {
+  $selectedInstanceSelector,
   $selectedPage,
   addTemporaryInstance,
-  getInstancePath,
-  selectInstance,
-} from "~/shared/awareness";
+} from "~/shared/nano-states";
+import { selectInstance } from "~/shared/nano-states";
 import { shallowEqual } from "shallow-equal";
 import {
   insertListItemAt,
   insertTemplateAt,
 } from "~/builder/features/workspace/canvas-tools/outline/block-utils";
-import { richTextPlaceholders } from "~/shared/content-model";
+import { richTextPlaceholders } from "@webstudio-is/project-build/runtime";
 
 const BindInstanceToNodePlugin = ({
   refs,
@@ -146,8 +147,8 @@ const CaretColorPlugin = () => {
 
     let isLightBackground = false;
     try {
-      const color = new Color(elementColor);
-      const alpha = color.alpha ?? 1;
+      const parsed = color.parse(elementColor);
+      const alpha = parsed.alpha ?? 1;
       isLightBackground = alpha < 0.1;
     } catch {
       // If we can't parse the color, assume it's not light
@@ -229,7 +230,7 @@ const OnChangeOnBlurPlugin = ({
         handleChange(editor.getEditorState(), "unmount");
       });
     },
-    [editor, handleChange]
+    [editor]
   );
 
   useEffect(() => {
@@ -245,7 +246,7 @@ const OnChangeOnBlurPlugin = ({
       rootElement?.addEventListener("blur", handleBlur);
       prevRootElement?.removeEventListener("blur", handleBlur);
     });
-  }, [editor, handleChange]);
+  }, [editor]);
 
   return null;
 };
@@ -309,7 +310,7 @@ const LinkSelectionPlugin = ({
             }
 
             // Register new link
-            const instanceId = nanoid();
+            const instanceId = builderRuntimeContext.createId();
 
             newLink.setAttribute(idAttribute, instanceId);
             // We set id + root selector here, for simplicity
@@ -488,7 +489,7 @@ const isSelectionFirstNode = () => {
 const getDomSelectionRect = () => {
   const domSelection = window.getSelection();
   if (!domSelection || !domSelection.focusNode) {
-    return undefined;
+    return;
   }
 
   // Get current line position
@@ -1019,7 +1020,10 @@ type RichTextContentPluginProps = {
 
 const RichTextContentPlugin = (props: RichTextContentPluginProps) => {
   const [templates] = useState(() =>
-    findTemplates(props.rootInstanceSelector, $instances.get())
+    findBlockTemplates({
+      anchor: props.rootInstanceSelector,
+      instances: $instances.get(),
+    })
   );
 
   if (templates === undefined) {
@@ -1097,16 +1101,13 @@ const RichTextContentPluginInternal = ({
 
         // Delete current
         if ($getRoot().getTextContentSize() === 0) {
-          const blockChildSelector =
-            findBlockChildSelector(rootInstanceSelector);
+          const blockChildSelector = findBlockChildSelector({
+            instanceSelector: rootInstanceSelector,
+            instances: $instances.get(),
+          });
 
           if (blockChildSelector) {
-            updateWebstudioData((data) => {
-              deleteInstanceMutable(
-                data,
-                getInstancePath(rootInstanceSelector, data.instances)
-              );
-            });
+            deleteInstanceBySelector(rootInstanceSelector);
           }
         }
       }
@@ -1165,31 +1166,22 @@ const RichTextContentPluginInternal = ({
                 .get()
                 .get(parentInstanceSelector[0]);
               const isLastChild = parentInstance?.children.length === 1;
-              updateWebstudioData((data) => {
-                deleteInstanceMutable(
-                  data,
-                  getInstancePath(
-                    isLastChild ? parentInstanceSelector : rootInstanceSelector,
-                    data.instances
-                  )
-                );
-              });
+              deleteInstanceBySelector(
+                isLastChild ? parentInstanceSelector : rootInstanceSelector
+              );
               event.preventDefault();
               return true;
             }
 
-            const blockChildSelector =
-              findBlockChildSelector(rootInstanceSelector);
+            const blockChildSelector = findBlockChildSelector({
+              instanceSelector: rootInstanceSelector,
+              instances: $instances.get(),
+            });
 
             if (blockChildSelector) {
               onNext(editor.getEditorState(), { reason: "left" });
 
-              updateWebstudioData((data) => {
-                deleteInstanceMutable(
-                  data,
-                  getInstancePath(blockChildSelector, data.instances)
-                );
-              });
+              deleteInstanceBySelector(blockChildSelector);
 
               event.preventDefault();
               return true;
@@ -1266,17 +1258,9 @@ const RichTextContentPluginInternal = ({
                 const isLastChild = parentInstance?.children.length === 1;
 
                 // Pressing Enter within an empty list item deletes the empty item
-                updateWebstudioData((data) => {
-                  deleteInstanceMutable(
-                    data,
-                    getInstancePath(
-                      isLastChild
-                        ? parentInstanceSelector
-                        : rootInstanceSelector,
-                      data.instances
-                    )
-                  );
-                });
+                deleteInstanceBySelector(
+                  isLastChild ? parentInstanceSelector : rootInstanceSelector
+                );
               }
 
               event.preventDefault();
@@ -1426,14 +1410,7 @@ const RichTextContentPluginInternal = ({
       // Safari and FF support as no blur event is triggered in some cases
       closeMenuWithUpdate();
     };
-  }, [
-    editor,
-    handleOpen,
-    onNext,
-    preservedSelection,
-    rootInstanceSelector,
-    templates,
-  ]);
+  }, [editor, onNext, preservedSelection, rootInstanceSelector, templates]);
 
   return null;
 };
@@ -1448,7 +1425,7 @@ type TextEditorProps = {
   props: Props;
   contentEditable: JSX.Element;
   editable?: boolean;
-  onChange: (instancesList: Instance[]) => void;
+  onChange: (instancesList: Instance[]) => void | Record<string, string>;
   onSelectInstance: (instanceId: Instance["id"]) => void;
 };
 
@@ -1466,7 +1443,7 @@ const InitialJSONStatePlugin = ({
 
   useEffect(() => {
     handleInitialState(editor.getEditorState().toJSON());
-  }, [editor, handleInitialState]);
+  }, [editor]);
 
   return null;
 };
@@ -1546,18 +1523,28 @@ export const TextEditor = ({
         if (treeRootInstance) {
           const jsonState = editorState.toJSON();
           if (deepEqual(jsonState, lastSavedStateJsonRef.current)) {
-            setDataCollapsed(rootInstanceSelector[0], false);
+            inflateInstance(rootInstanceSelector[0], false);
             return;
           }
 
-          onChange(
-            $convertToUpdates(treeRootInstance, refs, newLinkKeyToInstanceId)
+          const idMap = onChange(
+            $convertToUpdates(
+              treeRootInstance,
+              refs,
+              newLinkKeyToInstanceId,
+              builderRuntimeContext.createId
+            )
           );
+          if (idMap !== undefined) {
+            for (const [key, instanceId] of refs) {
+              refs.set(key, idMap[instanceId] ?? instanceId);
+            }
+          }
           newLinkKeyToInstanceId.clear();
           lastSavedStateJsonRef.current = jsonState;
         }
 
-        setDataCollapsed(rootInstanceSelector[0], false);
+        inflateInstance(rootInstanceSelector[0], false);
       });
 
       const textEditingSelector = $textEditingInstanceSelector.get()?.selector;
@@ -1629,13 +1616,11 @@ export const TextEditor = ({
         return;
       }
 
-      const editableInstanceSelectors: InstanceSelector[] = [];
-      findAllEditableInstanceSelector({
+      const editableInstanceSelectors = findAllNavigableTextInstanceSelectors({
         instanceSelector: [rootInstanceId],
         instances,
         props,
         metas,
-        results: editableInstanceSelectors,
       });
 
       const currentIndex = editableInstanceSelectors.findIndex(
@@ -1658,20 +1643,6 @@ export const TextEditor = ({
             : mod(currentIndex - i, editableInstanceSelectors.length);
 
         const nextSelector = editableInstanceSelectors[nextIndex];
-
-        const nextInstance = instances.get(nextSelector[0]);
-        if (nextInstance === undefined) {
-          continue;
-        }
-
-        const hasExpressionChildren = nextInstance.children.some(
-          (child) => child.type === "expression"
-        );
-
-        // opinionated: Skip if binded (double click is working)
-        if (hasExpressionChildren) {
-          continue;
-        }
 
         // Skip invisible elements
         if (getVisibleElementsByInstanceSelector(nextSelector).length === 0) {
@@ -1699,7 +1670,7 @@ export const TextEditor = ({
             continue;
           }
 
-          if (!elt.hasAttribute(collapsedAttribute)) {
+          if (!elt.hasAttribute(inflatedAttribute)) {
             continue;
           }
         }
@@ -1774,12 +1745,15 @@ export const TextEditor = ({
       <LinkSanitizePlugin />
       <HistoryPlugin />
 
+      {/* oxlint-disable-next-line react-hooks/rules-of-hooks -- our useEffectEvent is a stable callback */}
       <SwitchBlockPlugin onNext={handleNext} />
       <RichTextContentPlugin
         onOpen={handleContextMenuOpen}
         rootInstanceSelector={rootInstanceSelector}
+        // oxlint-disable-next-line react-hooks/rules-of-hooks -- our useEffectEvent is a stable callback
         onNext={handleNext}
       />
+      {/* oxlint-disable-next-line react-hooks/rules-of-hooks -- our useEffectEvent is a stable callback */}
       <OnChangeOnBlurPlugin onChange={handleChange} />
       <InitCursorPlugin />
       <LinkSelectionPlugin

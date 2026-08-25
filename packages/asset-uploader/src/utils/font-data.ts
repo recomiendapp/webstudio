@@ -1,20 +1,34 @@
-import { create as createFontKit } from "fontkit";
+import { create as createFontKit, type Font } from "fontkit";
 import {
   fontWeights,
   FONT_STYLES,
   type FontFormat,
-  type FontWeight,
   type VariationAxes,
   type FontStyle,
 } from "@webstudio-is/fonts";
+import { getFileNameParts } from "@webstudio-is/sdk";
 
 // same default fontkit uses internally
 const defaultLanguage = "en";
 
+const normalizeWeightName = (value: string) =>
+  value.toLowerCase().replaceAll(/[\s_-]+/g, "");
+
+const fontWeightAliases = Object.entries(fontWeights)
+  .flatMap(([weight, { names }]) =>
+    names.map((name) => ({
+      name: normalizeWeightName(name),
+      weight: Number(weight),
+    }))
+  )
+  .sort((left, right) => right.name.length - left.name.length);
+
 export const parseSubfamily = (
-  subfamily: string
+  subfamily: string,
+  weightClass?: number
 ): { style: FontStyle; weight: number } => {
   const subfamilyLow = subfamily.toLowerCase();
+  const normalizedSubfamily = normalizeWeightName(subfamily);
   let style: FontStyle = "normal";
   for (const possibleStyle of FONT_STYLES) {
     if (subfamilyLow.includes(possibleStyle)) {
@@ -22,14 +36,18 @@ export const parseSubfamily = (
       break;
     }
   }
-  let weight: FontWeight = "400";
-  for (weight in fontWeights) {
-    const { names } = fontWeights[weight];
-    if (names.some((name) => subfamilyLow.includes(name))) {
-      break;
-    }
+  if (
+    weightClass !== undefined &&
+    Number.isInteger(weightClass) &&
+    weightClass >= 1 &&
+    weightClass <= 1000
+  ) {
+    return { style, weight: weightClass };
   }
-  return { style, weight: Number(weight) };
+  const weight = fontWeightAliases.find(({ name }) =>
+    normalizedSubfamily.includes(name)
+  )?.weight;
+  return { style, weight: weight ?? 400 };
 };
 
 const splitAndTrim = (string: string) =>
@@ -54,9 +72,15 @@ const normalizeFamily = (
     return familyPartsNormalized.join(" ");
   }
   // Broken fonts may lack any family information, so last resort is to use the file name
-  const extensionIndex = fileName.lastIndexOf(".");
-  return extensionIndex === -1 ? fileName : fileName.slice(0, extensionIndex);
+  return getFileNameParts(fileName).basename;
 };
+
+type FontNameSource = Pick<Font, "getName">;
+
+const getFontFamily = (font: FontNameSource) =>
+  font.getName("preferredFamily", defaultLanguage) ||
+  font.getName("fontFamily", defaultLanguage) ||
+  "";
 
 type FontDataStatic = {
   format: FontFormat;
@@ -67,9 +91,37 @@ type FontDataStatic = {
 type FontDataVariable = {
   format: FontFormat;
   family: string;
+  style: FontStyle;
   variationAxes: VariationAxes;
 };
 type FontData = FontDataStatic | FontDataVariable;
+
+type FontStyleSource = {
+  "OS/2"?: {
+    fsSelection?: {
+      italic?: boolean;
+      oblique?: boolean;
+    };
+  };
+  italicAngle?: number;
+};
+
+const detectFontStyle = (
+  font: FontStyleSource,
+  fallback: FontStyle
+): FontStyle => {
+  const selection = font["OS/2"]?.fsSelection;
+  if (selection?.italic === true) {
+    return "italic";
+  }
+  if (selection?.oblique === true) {
+    return "oblique";
+  }
+  if (font.italicAngle !== undefined && font.italicAngle !== 0) {
+    return "italic";
+  }
+  return fallback;
+};
 
 export const getFontData = (data: Uint8Array, fileName: string): FontData => {
   const font = createFontKit(data as Buffer);
@@ -77,18 +129,24 @@ export const getFontData = (data: Uint8Array, fileName: string): FontData => {
     throw Error(`Unsupported font type ${font.type}`);
   }
   const format = font.type.toLowerCase() as FontData["format"];
-  const originalFamily = font.getName("fontFamily", defaultLanguage) ?? "";
+  const originalFamily = getFontFamily(font);
   const subfamily =
     font.getName("preferredSubfamily", defaultLanguage) ??
     font.getName("fontSubfamily", defaultLanguage) ??
     "";
   const family = normalizeFamily(originalFamily, subfamily, fileName);
+  const parsedSubfamily = parseSubfamily(
+    subfamily,
+    font["OS/2"]?.usWeightClass
+  );
+  const style = detectFontStyle(font, parsedSubfamily.style);
   const isVariable = Object.keys(font.variationAxes).length !== 0;
 
   if (isVariable) {
     return {
       format,
       family,
+      style,
       variationAxes: font.variationAxes,
     };
   }
@@ -96,7 +154,8 @@ export const getFontData = (data: Uint8Array, fileName: string): FontData => {
   return {
     format,
     family,
-    ...parseSubfamily(subfamily),
+    style,
+    weight: parsedSubfamily.weight,
   };
 };
 
@@ -106,4 +165,6 @@ export const __testing__: {
     subfamily: string,
     fileName: string
   ) => string;
-} = { normalizeFamily };
+  getFontFamily: typeof getFontFamily;
+  detectFontStyle: typeof detectFontStyle;
+} = { normalizeFamily, getFontFamily, detectFontStyle };

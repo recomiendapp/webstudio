@@ -13,3 +13,23 @@ const tokenRegexGlobal = new RegExp(tokenRegex.source, "g");
 export const matchPathnameParams = (pathname: string) => {
   return pathname.matchAll(tokenRegexGlobal);
 };
+
+export const removeTrailingSlash = (pathname: string) => {
+  let end = pathname.length;
+  while (end > 1 && pathname[end - 1] === "/") {
+    end -= 1;
+  }
+  return pathname.slice(0, end);
+};
+
+/**
+ * Check if a string is an absolute URL (has a valid protocol)
+ */
+export const isAbsoluteUrl = (href: string) => {
+  try {
+    new URL(href);
+    return true;
+  } catch {
+    return false;
+  }
+};

@@ -67,6 +67,37 @@ test("generate resources loader", () => {
   `);
 });
 
+test("generates a configured Assets request on the standard endpoint", () => {
+  const generated = generateResources({
+    scope: createScope(),
+    page: { rootInstanceId: "body" } as Page,
+    dataSources: toMap([
+      {
+        id: "postsVariable",
+        scopeInstanceId: "body",
+        type: "resource",
+        name: "Posts",
+        resourceId: "postsResource",
+      },
+    ]),
+    resources: toMap([
+      {
+        id: "postsResource",
+        name: "Posts",
+        control: "system" as const,
+        url: '"/$resources/assets"',
+        method: "post" as const,
+        headers: [],
+        body: "{ query: { where: { all: [] }, limit: 20, offset: 0 } }",
+      },
+    ]),
+    props: new Map(),
+  });
+
+  expect(generated).toContain('url: "/$resources/assets"');
+  expect(generated).not.toContain('resourceId: "postsResource"');
+});
+
 test("generate variable and use in resources loader", () => {
   expect(
     generateResources({
@@ -197,9 +228,9 @@ test("generate page system variable and use in resources loader", () => {
 
 test("generate global system variable and use in resources loader", () => {
   const myResource = new ResourceValue("My Resource", {
+    control: "system",
     url: expression`"https://my-json.com/" + $ws$system.params.slug`,
     method: "post",
-    searchParams: [{ name: "filter", value: expression`{search:'term'}` }],
     headers: [{ name: "Content-Type", value: expression`"application/json"` }],
     body: expression`{ body: true }`,
   });
@@ -219,9 +250,9 @@ test("generate global system variable and use in resources loader", () => {
       const system = _props.system
       const MyResource: ResourceRequest = {
         name: "My Resource",
+        control: "system",
         url: "https://my-json.com/" + system?.params?.slug,
         searchParams: [
-          { name: "filter", value: {search:'term'} },
         ],
         method: "post",
         headers: [
@@ -387,7 +418,7 @@ test("prevent generating unused system variable", () => {
   `);
 });
 
-test("generate action resource", () => {
+test("generate action resource without loading a stale data source", () => {
   expect(
     generateResources({
       scope: createScope(),
@@ -395,7 +426,15 @@ test("generate action resource", () => {
         rootInstanceId: "body",
         systemDataSourceId: "variableParamsId",
       } as Page,
-      dataSources: new Map(),
+      dataSources: toMap([
+        {
+          id: "resourceDataSourceId",
+          scopeInstanceId: "body",
+          type: "resource",
+          name: "resourceDataSource",
+          resourceId: "resourceId",
+        },
+      ]),
       resources: toMap([
         {
           id: "resourceId",
@@ -431,6 +470,66 @@ test("generate action resource", () => {
       ])
       const _action = new Map<string, ResourceRequest>([
         ["resourceName", resourceName],
+      ])
+      return { data: _data, action: _action }
+    }
+    "
+  `);
+});
+
+test("skip missing resource referenced by data source", () => {
+  expect(
+    generateResources({
+      scope: createScope(),
+      page: { rootInstanceId: "body" } as Page,
+      dataSources: toMap([
+        {
+          id: "variableResourceId",
+          scopeInstanceId: "body",
+          type: "resource",
+          name: "missingResource",
+          resourceId: "missingResourceId",
+        },
+      ]),
+      resources: new Map(),
+      props: new Map(),
+    })
+  ).toMatchInlineSnapshot(`
+    "import type { System, ResourceRequest } from "@webstudio-is/sdk";
+    export const getResources = (_props: { system: System }) => {
+      const _data = new Map<string, ResourceRequest>([
+      ])
+      const _action = new Map<string, ResourceRequest>([
+      ])
+      return { data: _data, action: _action }
+    }
+    "
+  `);
+});
+
+test("skip missing resource referenced by action prop", () => {
+  expect(
+    generateResources({
+      scope: createScope(),
+      page: { rootInstanceId: "body" } as Page,
+      dataSources: new Map(),
+      resources: new Map(),
+      props: toMap([
+        {
+          id: "propId",
+          instanceId: "body",
+          name: "myProp",
+          type: "resource",
+          value: "missingResourceId",
+        },
+      ]),
+    })
+  ).toMatchInlineSnapshot(`
+    "import type { System, ResourceRequest } from "@webstudio-is/sdk";
+    export const getResources = (_props: { system: System }) => {
+      const _data = new Map<string, ResourceRequest>([
+      ])
+      const _action = new Map<string, ResourceRequest>([
       ])
       return { data: _data, action: _action }
     }

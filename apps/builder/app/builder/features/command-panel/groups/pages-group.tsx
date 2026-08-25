@@ -6,13 +6,15 @@ import {
   useSelectedAction,
 } from "@webstudio-is/design-system";
 import { computed } from "nanostores";
-import type { Page } from "@webstudio-is/sdk";
+import { getAllPages, type Page } from "@webstudio-is/sdk";
 import { $pages } from "~/shared/sync/data-stores";
 import { $editingPageId } from "~/shared/nano-states";
-import { $selectedPage, selectPage } from "~/shared/awareness";
+import { $selectedPage } from "~/shared/nano-states";
+import { selectPage } from "~/shared/nano-states";
 import { setActiveSidebarPanel } from "~/builder/shared/nano-states";
 import { closeCommandPanel, $isCommandPanelOpen } from "../command-state";
 import type { BaseOption } from "../shared/types";
+import { getPageDisplayName } from "~/builder/features/pages/page-utils";
 
 export type PageOption = BaseOption & {
   type: "page";
@@ -27,12 +29,12 @@ export const $pageOptions = computed(
     }
     const pageOptions: PageOption[] = [];
     if (pages) {
-      for (const page of [pages.homePage, ...pages.pages]) {
+      for (const page of getAllPages(pages)) {
         if (page.id === selectedPage?.id) {
           continue;
         }
         pageOptions.push({
-          terms: ["pages", page.name],
+          terms: ["pages", getPageDisplayName(page)],
           type: "page",
           page,
         });
@@ -74,7 +76,7 @@ export const PagesGroup = ({ options }: { options: PageOption[] }) => {
             }
           }}
         >
-          <Text>{page.name}</Text>
+          <Text>{getPageDisplayName(page)}</Text>
         </CommandItem>
       ))}
     </CommandGroup>

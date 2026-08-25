@@ -7,19 +7,22 @@ import {
   Text,
 } from "@webstudio-is/design-system";
 import { computed } from "nanostores";
-import { elementComponent, tags } from "@webstudio-is/sdk";
+import { elementComponent } from "@webstudio-is/sdk";
 import type { Instance } from "@webstudio-is/sdk";
 import {
-  $instances,
-  $props,
+  $propsIndex,
   $registeredComponentMetas,
+  $selectedInstancePath,
+  $selectedPage,
 } from "~/shared/nano-states";
-import { insertWebstudioFragmentAt } from "~/shared/instance-utils";
-import { $selectedInstancePath } from "~/shared/awareness";
+import { $instances } from "~/shared/sync/data-stores";
+import { $props } from "~/shared/sync/data-stores";
+import { insertWebstudioFragmentAt } from "~/shared/instance-utils/insert";
 import { InstanceIcon } from "~/builder/shared/instance-label";
-import { isTreeSatisfyingContentModel } from "~/shared/content-model";
+import { getValidElementChildTags } from "@webstudio-is/project-build/runtime";
 import { closeCommandPanel, $isCommandPanelOpen } from "../command-state";
 import type { BaseOption } from "../shared/types";
+import { allowsHtmlMutations } from "../shared/document-utils";
 
 export type TagOption = BaseOption & {
   type: "tag";
@@ -32,46 +35,43 @@ export const $tagOptions = computed(
     $selectedInstancePath,
     $instances,
     $props,
+    $propsIndex,
     $registeredComponentMetas,
+    $selectedPage,
   ],
-  (isOpen, instancePath, instances, props, metas) => {
+  (
+    isCommandPanelOpen,
+    instancePath,
+    instances,
+    props,
+    propsIndex,
+    metas,
+    selectedPage
+  ) => {
     const tagOptions: TagOption[] = [];
-    if (!isOpen) {
+    if (isCommandPanelOpen === false) {
       return tagOptions;
     }
     if (instancePath === undefined) {
       return tagOptions;
     }
+    if (!allowsHtmlMutations(selectedPage)) {
+      return tagOptions;
+    }
     const [{ instance, instanceSelector }] = instancePath;
-    const childInstance: Instance = {
-      type: "instance",
-      id: "new_instance",
-      component: elementComponent,
-      children: [],
-    };
-    const newInstances = new Map(instances);
-    newInstances.set(childInstance.id, childInstance);
-    newInstances.set(instance.id, {
-      ...instance,
-      // avoid preserving original children to not invalidate tag
-      // when some descendants do not satisfy content model
-      children: [{ type: "id", value: childInstance.id }],
-    });
-    for (const tag of tags) {
-      childInstance.tag = tag;
-      const isSatisfying = isTreeSatisfyingContentModel({
-        instances: newInstances,
-        props,
-        metas,
-        instanceSelector,
+    for (const tag of getValidElementChildTags({
+      parentInstanceId: instance.id,
+      parentInstanceSelector: instanceSelector,
+      instances,
+      props,
+      metas,
+      htmlTagsByInstanceId: propsIndex.htmlTagsByInstanceId,
+    })) {
+      tagOptions.push({
+        terms: ["tags", tag, `<${tag}>`],
+        type: "tag",
+        tag,
       });
-      if (isSatisfying) {
-        tagOptions.push({
-          terms: ["tags", tag, `<${tag}>`],
-          type: "tag",
-          tag,
-        });
-      }
     }
     return tagOptions;
   }
@@ -101,7 +101,7 @@ export const TagsGroup = ({ options }: { options: TagOption[] }) => {
                 tag,
                 children: [],
               };
-              insertWebstudioFragmentAt({
+              void insertWebstudioFragmentAt({
                 children: [{ type: "id", value: newInstance.id }],
                 instances: [newInstance],
                 props: [],

@@ -1,4 +1,6 @@
 export * from "./schema/assets";
+export * from "./schema/asset-resource";
+export * from "./schema/asset-folders";
 export * from "./schema/pages";
 export * from "./schema/instances";
 export * from "./schema/data-sources";
@@ -14,16 +16,36 @@ export * from "./schema/prop-meta";
 export * from "./schema/component-meta";
 
 export * from "./assets";
+export * from "./asset-folder-hierarchy";
+export * from "./asset-folder-normalization";
+export * from "./asset-resource-config";
 export * from "./core-metas";
 export * from "./instances-utils";
 export * from "./page-utils";
 export * from "./scope";
+export type {
+  ComponentBuildContribution,
+  ComponentBuildHook,
+  ComponentBuildImport,
+} from "./component-build";
 export * from "./expression";
 export * from "./resources-generator";
 export * from "./page-meta-generator";
 export * from "./url-pattern";
+export * from "./link-utils";
+export * from "./json-ld";
 export * from "./css";
 export * from "./__generated__/tags";
+export {
+  getInputJsonSchemaAdditionalProperties,
+  getInputJsonSchemaMetadata,
+  getInputJsonSchemaProperties,
+  inputJsonSchemaAcceptsType,
+  toInputJsonSchemaObject,
+  type InputJsonSchema,
+  type InputJsonSchemaValue,
+  type InputJsonSchemaMetadata,
+} from "./input-json-schema";
 
 export type {
   AnimationAction,
@@ -46,12 +68,13 @@ export type {
 } from "./schema/animation-schema";
 
 export {
-  animationActionSchema,
-  scrollAnimationSchema,
-  viewAnimationSchema,
-  rangeUnitValueSchema,
-  animationKeyframeSchema,
-  insetUnitValueSchema,
-  durationUnitValueSchema,
+  animationAction,
+  createAnimationActionInput,
+  scrollAnimation,
+  viewAnimation,
+  rangeUnitValue,
+  animationKeyframe,
+  insetUnitValue,
+  durationUnitValue,
   RANGE_UNITS,
 } from "./schema/animation-schema";

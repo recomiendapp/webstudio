@@ -1,3 +1,10 @@
+import { findClosestInsertable } from "~/shared/instance-utils/insert";
+import { insertWebstudioFragmentAt } from "~/shared/instance-utils/insert";
+import {
+  detectPageTokenConflicts,
+  extractWebstudioFragment,
+} from "@webstudio-is/project-build/runtime";
+import { executeRuntimeMutation } from "~/shared/instance-utils/data";
 import { useMemo } from "react";
 import {
   Button,
@@ -13,8 +20,10 @@ import {
 import { ChevronLeftIcon, ExternalLinkIcon } from "@webstudio-is/icons";
 import {
   elementComponent,
-  Instance,
+  getAllPages,
+  type Instance,
   ROOT_FOLDER_ID,
+  ROOT_INSTANCE_ID,
   type Asset,
   type Page,
   type WebstudioData,
@@ -23,16 +32,16 @@ import type { MarketplaceProduct } from "@webstudio-is/project-build";
 import { mapGroupBy } from "~/shared/shim";
 import { CollapsibleSection } from "~/builder/shared/collapsible-section";
 import { builderUrl } from "~/shared/router-utils";
-import {
-  extractWebstudioFragment,
-  findClosestInsertable,
-  insertWebstudioFragmentAt,
-  updateWebstudioData,
-} from "~/shared/instance-utils";
-import { insertPageCopyMutable } from "~/shared/page-utils";
+import { getWebstudioData } from "~/shared/instance-utils/data";
+import { $project } from "~/shared/sync/data-stores";
 import { Card } from "./card";
 import type { MarketplaceOverviewItem } from "~/shared/marketplace/types";
-import { selectPage } from "~/shared/awareness";
+import { selectPage } from "~/shared/nano-states";
+import {
+  resolveFragmentTokenConflicts,
+  resolveTokenConflicts,
+} from "~/shared/resolve-token-conflicts";
+import { resolveRootStyleConflicts } from "~/shared/resolve-root-style-conflicts";
 
 const isBody = (instance: Instance) =>
   instance.component === "Body" ||
@@ -43,7 +52,7 @@ const isBody = (instance: Instance) =>
  * - Currently only supports inserting everything from the body
  * - Could be extended to support children of some other instance e.g. Marketplace Item
  */
-const insertSection = ({
+const insertSection = async ({
   data,
   instanceId,
 }: {
@@ -66,24 +75,56 @@ const insertSection = ({
     if (insertable.position === "end") {
       insertable.position = "after";
     }
-    insertWebstudioFragmentAt(fragment, insertable);
+    const conflictResolution = await resolveFragmentTokenConflicts(fragment);
+    if (conflictResolution === "cancel") {
+      return;
+    }
+    await insertWebstudioFragmentAt(fragment, insertable, conflictResolution);
   }
 };
 
-const insertPage = ({
+const insertPage = async ({
   data: sourceData,
   pageId,
 }: {
   data: WebstudioData;
   pageId: Page["id"];
 }) => {
-  let newPageId: undefined | Page["id"];
-  updateWebstudioData((targetData) => {
-    newPageId = insertPageCopyMutable({
-      source: { data: sourceData, pageId },
-      target: { data: targetData, folderId: ROOT_FOLDER_ID },
-    });
+  const tokenTargetData = getWebstudioData();
+  const conflicts = detectPageTokenConflicts({
+    sourceData,
+    targetData: tokenTargetData,
+    pageId,
   });
+  const conflictResolution = await resolveTokenConflicts(conflicts);
+  if (conflictResolution === "cancel") {
+    return;
+  }
+  const rootStyleTargetData = getWebstudioData();
+  const rootFragment = extractWebstudioFragment(sourceData, ROOT_INSTANCE_ID);
+  const rootStyleConflictResolution = await resolveRootStyleConflicts({
+    fragment: rootFragment,
+    targetData: rootStyleTargetData,
+  });
+  if (rootStyleConflictResolution === "cancel") {
+    return;
+  }
+  const projectId = $project.get()?.id;
+  if (projectId === undefined) {
+    return;
+  }
+  const result = executeRuntimeMutation({
+    id: "pages.copy",
+    input: {
+      sourceData,
+      pageId,
+      parentFolderId: ROOT_FOLDER_ID,
+      projectId,
+      conflictResolution,
+      rootStyleConflictResolution,
+    },
+  });
+  const newPageId = result?.result.pageId;
   if (newPageId) {
     selectPage(newPageId);
   }
@@ -102,7 +143,7 @@ const getTemplatesDataByCategory = (
   if (data === undefined) {
     return new Map();
   }
-  const pages = [data.pages.homePage, ...data.pages.pages]
+  const pages = getAllPages(data.pages)
     .filter((page) => page.marketplace?.include)
     .map((page) => {
       // category can be empty string
@@ -213,6 +254,8 @@ export const Templates = ({
                                 insertSection({
                                   data,
                                   instanceId: templateData.rootInstanceId,
+                                }).catch(() => {
+                                  // User cancelled conflict dialog
                                 });
                               }
                               if (
@@ -222,6 +265,8 @@ export const Templates = ({
                                 insertPage({
                                   data,
                                   pageId: templateData.pageId,
+                                }).catch(() => {
+                                  // User cancelled conflict dialog
                                 });
                               }
                             }}

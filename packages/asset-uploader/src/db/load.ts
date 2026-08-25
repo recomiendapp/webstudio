@@ -1,62 +1,72 @@
 import {
   authorizeProject,
-  type AppContext,
   AuthorizationError,
+  type AppContext,
 } from "@webstudio-is/trpc-interface/index.server";
-import type { Asset } from "@webstudio-is/sdk";
-import { formatAsset } from "../utils/format-asset";
+import {
+  normalizeAssetFolderData,
+  type Asset,
+  type AssetFolder,
+} from "@webstudio-is/sdk";
+import { loadAssetsByProjectWithClient } from "../asset-patch-core";
+import { loadAssetFoldersByProjectWithClient } from "../folder-persistence";
+
+type LoadAssetOptions = { skipPermissionsCheck?: boolean };
+
+const assertAssetReadPermission = async (
+  projectId: string,
+  context: AppContext,
+  skipPermissionsCheck: boolean
+) => {
+  if (
+    skipPermissionsCheck === false &&
+    (await authorizeProject.hasProjectPermit(
+      { projectId, permit: "view" },
+      context
+    )) === false
+  ) {
+    throw new AuthorizationError(
+      "You don't have access to this project's assets"
+    );
+  }
+};
 
 export const loadAssetsByProject = async (
   projectId: string,
   context: AppContext,
-  { skipPermissionsCheck = false }: { skipPermissionsCheck?: boolean } = {}
+  { skipPermissionsCheck = false }: LoadAssetOptions = {}
 ): Promise<Asset[]> => {
-  const canRead =
-    skipPermissionsCheck ||
-    (await authorizeProject.hasProjectPermit(
-      { projectId, permit: "view" },
-      context
-    ));
+  const { assets } = await loadAssetDataByProject(projectId, context, {
+    skipPermissionsCheck,
+  });
+  return assets;
+};
 
-  if (canRead === false) {
-    throw new AuthorizationError(
-      "You don't have access to this project assets"
-    );
-  }
-
-  const assets = await context.postgrest.client
-    .from("Asset")
-    // use inner to filter out assets without file
-    // when file is not uploaded
-    .select(
-      `
-        assetId:id,
-        projectId,
-        filename,
-        description,
-        file:File!inner (*)
-      `
-    )
-    .eq("projectId", projectId)
-    .eq("file.status", "UPLOADED")
-    // always sort by primary key to get stable list
-    // required to not break fixtures
-    .order("id");
-
-  const result: Asset[] = [];
-  for (const {
-    assetId,
+export const loadAssetFoldersByProject = async (
+  projectId: string,
+  context: AppContext,
+  { skipPermissionsCheck = false }: LoadAssetOptions = {}
+): Promise<AssetFolder[]> => {
+  await assertAssetReadPermission(projectId, context, skipPermissionsCheck);
+  return loadAssetFoldersByProjectWithClient(
     projectId,
-    filename,
-    description,
-    file,
-  } of assets.data ?? []) {
-    if (file) {
-      result.push(
-        formatAsset({ assetId, projectId, filename, description, file })
-      );
-    }
-  }
+    context.postgrest.client
+  );
+};
 
-  return result;
+export const loadAssetDataByProject = async (
+  projectId: string,
+  context: AppContext,
+  { skipPermissionsCheck = false }: LoadAssetOptions = {}
+) => {
+  await assertAssetReadPermission(projectId, context, skipPermissionsCheck);
+  const [assets, assetFolders] = await Promise.all([
+    loadAssetsByProjectWithClient(projectId, context.postgrest.client),
+    loadAssetFoldersByProjectWithClient(projectId, context.postgrest.client),
+  ]);
+  const normalized = normalizeAssetFolderData({
+    assets,
+    folders: assetFolders,
+  });
+  return { assets: normalized.assets, assetFolders: normalized.folders };
 };

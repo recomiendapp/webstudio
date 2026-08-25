@@ -1,0 +1,357 @@
+import {
+  migratePages,
+  serializePages,
+} from "@webstudio-is/project-migrations/pages";
+import { migrateResourcesMutable } from "@webstudio-is/project-migrations/resources";
+import {
+  type BuilderState,
+  type BuilderStateValueByNamespace,
+} from "./builder-state";
+import {
+  builderNamespaces,
+  type BuilderNamespace,
+} from "../contracts/namespaces";
+import {
+  getStyleDeclKey,
+  type Asset,
+  type AssetFolder,
+  type Breakpoint,
+  type DataSource,
+  type Instance,
+  type Pages,
+  type Prop,
+  type Resource,
+  type StyleDecl,
+  type StyleSource,
+  type StyleSourceSelection,
+} from "@webstudio-is/sdk";
+import type { MarketplaceProduct } from "../shared/marketplace";
+import {
+  createProjectSettingsFromPages,
+  removeLegacyProjectSettingsFromPages,
+  type ProjectSettings,
+} from "../shared/project-settings";
+import type { CompactBuild } from "../types";
+
+type SnapshotValue<Namespace extends BuilderNamespace> =
+  BuilderStateValueByNamespace[Namespace] extends Map<infer Key, infer Value>
+    ? readonly (readonly [Key, Value])[]
+    : BuilderStateValueByNamespace[Namespace];
+
+export type BuilderStateSnapshot = Partial<{
+  [Namespace in BuilderNamespace]: SnapshotValue<Namespace>;
+}>;
+
+export type SerializedBuilderStateSnapshot = Omit<
+  BuilderStateSnapshot,
+  "pages"
+> & {
+  pages?: unknown;
+};
+
+export type BuilderBuildDataSnapshot = Partial<{
+  pages: Pages;
+  instances: Instance[];
+  props: Prop[];
+  styles: StyleDecl[];
+  styleSources: StyleSource[];
+  styleSourceSelections: StyleSourceSelection[];
+  dataSources: DataSource[];
+  resources: Resource[];
+  assets: Asset[];
+  assetFolders: AssetFolder[];
+  breakpoints: Breakpoint[];
+  marketplaceProduct: MarketplaceProduct;
+  projectSettings: ProjectSettings;
+}>;
+
+export type BuilderCompactBuildDataSnapshot = Pick<
+  CompactBuild,
+  | "pages"
+  | "breakpoints"
+  | "styles"
+  | "styleSources"
+  | "styleSourceSelections"
+  | "props"
+  | "dataSources"
+  | "resources"
+  | "instances"
+  | "marketplaceProduct"
+> & {
+  assets?: Asset[];
+  assetFolders?: AssetFolder[];
+  projectSettings?: ProjectSettings;
+};
+
+export type BuilderStateStore<Namespace extends BuilderNamespace> = {
+  get: () => BuilderStateValueByNamespace[Namespace] | undefined;
+};
+
+export type BuilderStateStoreMap = Partial<{
+  [Namespace in BuilderNamespace]: BuilderStateStore<Namespace>;
+}>;
+
+const cloneMapEntries = <Key, Value>(
+  entries: readonly (readonly [Key, Value])[]
+) => {
+  return new Map(entries.map(([key, value]) => [key, structuredClone(value)]));
+};
+
+const cloneMap = <Key, Value>(map: Map<Key, Value>) => {
+  return cloneMapEntries(Array.from(map.entries()));
+};
+
+const mapEntriesById = <Item extends { id: string }>(items: Item[]) =>
+  items.map((item) => [item.id, item] as const);
+
+const normalizeProjectSettings = (state: BuilderState) => {
+  if (state.pages === undefined) {
+    return;
+  }
+  state.projectSettings ??= createProjectSettingsFromPages(state.pages);
+  removeLegacyProjectSettingsFromPages(state.pages);
+};
+
+const normalizeResources = (state: BuilderState) => {
+  if (state.resources !== undefined) {
+    migrateResourcesMutable(state.resources.values());
+  }
+};
+
+const setClonedBuilderStateValue = <Namespace extends BuilderNamespace>(
+  state: BuilderState,
+  namespace: Namespace,
+  value: BuilderStateValueByNamespace[Namespace] | SnapshotValue<Namespace>
+) => {
+  if (namespace === "pages") {
+    state.pages = migratePages(serializePages(value as Pages));
+    return;
+  }
+  if (namespace === "marketplaceProduct" || namespace === "projectSettings") {
+    (state as Record<string, unknown>)[namespace] = structuredClone(value);
+    return;
+  }
+  (state as Record<string, unknown>)[namespace] =
+    value instanceof Map
+      ? cloneMap(value as Map<unknown, unknown>)
+      : cloneMapEntries(value as readonly (readonly [unknown, unknown])[]);
+};
+
+export const createBuilderStateFromStores = (
+  stores: BuilderStateStoreMap,
+  namespaces: readonly BuilderNamespace[] = builderNamespaces
+): BuilderState => {
+  const state: BuilderState = {};
+
+  for (const namespace of namespaces) {
+    const value = stores[namespace]?.get();
+    if (value !== undefined) {
+      setClonedBuilderStateValue(state, namespace, value);
+    }
+  }
+
+  normalizeProjectSettings(state);
+  normalizeResources(state);
+
+  return state;
+};
+
+export const createBuilderStateFromSnapshot = (
+  build: BuilderStateSnapshot
+): BuilderState => {
+  const state: BuilderState = {};
+
+  for (const namespace of builderNamespaces) {
+    const value = build[namespace];
+    if (value !== undefined) {
+      setClonedBuilderStateValue(
+        state,
+        namespace,
+        value as SnapshotValue<typeof namespace>
+      );
+    }
+  }
+
+  normalizeProjectSettings(state);
+  normalizeResources(state);
+
+  return state;
+};
+
+export const createBuilderStateFromSerializedSnapshot = (
+  build: SerializedBuilderStateSnapshot
+): BuilderState => {
+  const { pages, ...snapshot } = build;
+  const state = createBuilderStateFromSnapshot(snapshot);
+
+  if (pages !== undefined) {
+    setClonedBuilderStateValue(state, "pages", migratePages(pages));
+  }
+  normalizeProjectSettings(state);
+
+  return state;
+};
+
+export const createBuilderStateFromBuildData = (
+  build: BuilderBuildDataSnapshot
+): BuilderState => {
+  const snapshot: BuilderStateSnapshot = {};
+
+  if (build.pages !== undefined) {
+    snapshot.pages = build.pages;
+  }
+  if (build.instances !== undefined) {
+    snapshot.instances = mapEntriesById(build.instances);
+  }
+  if (build.props !== undefined) {
+    snapshot.props = mapEntriesById(build.props);
+  }
+  if (build.styles !== undefined) {
+    snapshot.styles = build.styles.map((styleDecl) => [
+      getStyleDeclKey(styleDecl),
+      styleDecl,
+    ]);
+  }
+  if (build.styleSources !== undefined) {
+    snapshot.styleSources = mapEntriesById(build.styleSources);
+  }
+  if (build.styleSourceSelections !== undefined) {
+    snapshot.styleSourceSelections = build.styleSourceSelections.map(
+      (selection) => [selection.instanceId, selection] as const
+    );
+  }
+  if (build.dataSources !== undefined) {
+    snapshot.dataSources = mapEntriesById(build.dataSources);
+  }
+  if (build.resources !== undefined) {
+    snapshot.resources = mapEntriesById(build.resources);
+  }
+  if (build.assets !== undefined) {
+    snapshot.assets = mapEntriesById(build.assets);
+  }
+  if (build.assetFolders !== undefined) {
+    snapshot.assetFolders = mapEntriesById(build.assetFolders);
+  }
+  if (build.breakpoints !== undefined) {
+    snapshot.breakpoints = mapEntriesById(build.breakpoints);
+  }
+  if (build.marketplaceProduct !== undefined) {
+    snapshot.marketplaceProduct = build.marketplaceProduct;
+  }
+  if (build.projectSettings !== undefined) {
+    snapshot.projectSettings = build.projectSettings;
+  }
+
+  return createBuilderStateFromSnapshot(snapshot);
+};
+
+export const createBuilderStateFromCompactBuild = (
+  build: BuilderCompactBuildDataSnapshot
+): BuilderState =>
+  createBuilderStateFromBuildData({
+    pages: build.pages,
+    breakpoints: build.breakpoints,
+    styles: build.styles,
+    styleSources: build.styleSources,
+    styleSourceSelections: build.styleSourceSelections,
+    props: build.props,
+    dataSources: build.dataSources,
+    resources: build.resources,
+    instances: build.instances,
+    assets: build.assets,
+    assetFolders: build.assetFolders,
+    marketplaceProduct: build.marketplaceProduct,
+    projectSettings:
+      build.projectSettings ?? createProjectSettingsFromPages(build.pages),
+  });
+
+export const createBuilderBuildDataSnapshotFromState = (
+  state: BuilderState
+): BuilderBuildDataSnapshot => {
+  const snapshot: BuilderBuildDataSnapshot = {};
+
+  for (const namespace of builderNamespaces) {
+    const value = state[namespace];
+    if (value === undefined) {
+      continue;
+    }
+    if (
+      namespace === "pages" ||
+      namespace === "projectSettings" ||
+      namespace === "marketplaceProduct"
+    ) {
+      (snapshot as Record<string, unknown>)[namespace] = structuredClone(value);
+      continue;
+    }
+    (snapshot as Record<string, unknown>)[namespace] = Array.from(
+      (value as Map<unknown, unknown>).values(),
+      (entry) => structuredClone(entry)
+    );
+  }
+
+  return snapshot;
+};
+
+export const createBuilderStateSnapshotFromState = (
+  state: BuilderState
+): BuilderStateSnapshot => {
+  const snapshot: BuilderStateSnapshot = {};
+
+  for (const namespace of builderNamespaces) {
+    const value = state[namespace];
+    if (value === undefined) {
+      continue;
+    }
+    if (
+      namespace === "pages" ||
+      namespace === "projectSettings" ||
+      namespace === "marketplaceProduct"
+    ) {
+      (snapshot as Record<string, unknown>)[namespace] = structuredClone(value);
+      continue;
+    }
+    (snapshot as Record<string, unknown>)[namespace] = Array.from(
+      (value as Map<unknown, unknown>).entries()
+    ).map(([key, entry]) => [key, structuredClone(entry)]);
+  }
+
+  return snapshot;
+};
+
+export const createSerializedBuilderStateSnapshotFromState = (
+  state: BuilderState
+): SerializedBuilderStateSnapshot => {
+  const snapshot = createBuilderStateSnapshotFromState(
+    state
+  ) as SerializedBuilderStateSnapshot;
+  if (state.pages !== undefined) {
+    snapshot.pages = serializePages(state.pages);
+  }
+  return snapshot;
+};
+
+const toMutableEntries = <Key, Value>(
+  entries: readonly (readonly [Key, Value])[] | undefined
+): [Key, Value][] => Array.from(entries ?? [], ([key, value]) => [key, value]);
+
+export const createSerializedBuilderBuildDataFromState = (
+  state: BuilderState
+) => {
+  const snapshot = createSerializedBuilderStateSnapshotFromState(state);
+  if (snapshot.pages === undefined) {
+    throw new Error("Builder state pages are missing.");
+  }
+  return {
+    pages: snapshot.pages,
+    breakpoints: toMutableEntries(snapshot.breakpoints),
+    styles: toMutableEntries(snapshot.styles),
+    styleSources: toMutableEntries(snapshot.styleSources),
+    styleSourceSelections: toMutableEntries(snapshot.styleSourceSelections),
+    props: toMutableEntries(snapshot.props),
+    instances: toMutableEntries(snapshot.instances),
+    dataSources: toMutableEntries(snapshot.dataSources),
+    resources: toMutableEntries(snapshot.resources),
+    marketplaceProduct: snapshot.marketplaceProduct,
+    projectSettings: snapshot.projectSettings,
+  };
+};

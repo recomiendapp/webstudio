@@ -1,1 +1,10 @@
-export type AssetType = "image" | "font" | "video" | "file";
+import type { Asset } from "@webstudio-is/sdk";
+
+type UploadTicketBase = {
+  assetId: Asset["id"];
+  name: string;
+};
+
+export type UploadTicket =
+  | (UploadTicketBase & { deduplicated: false })
+  | (UploadTicketBase & { deduplicated: true; asset: Asset });

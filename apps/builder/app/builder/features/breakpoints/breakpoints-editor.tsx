@@ -15,16 +15,23 @@ import {
   Popover,
   PopoverTrigger,
   PopoverContent,
+  ScrollAreaNative,
+  toast,
 } from "@webstudio-is/design-system";
-import { MinusIcon, PlusIcon } from "@webstudio-is/icons";
+import { PlusIcon, TrashIcon } from "@webstudio-is/icons";
 import { useStore } from "@nanostores/react";
 import { $breakpoints } from "~/shared/sync/data-stores";
-import { groupBreakpoints, isBaseBreakpoint } from "~/shared/breakpoints";
-import { serverSyncStore } from "~/shared/sync/sync-stores";
+import {
+  breakpointLimitWarning,
+  groupBreakpoints,
+  hasReachedBreakpointLimit,
+  isBaseBreakpoint,
+} from "@webstudio-is/project-build/runtime";
 import { ConditionInput } from "./condition-input";
 import { CssValueInput } from "~/builder/features/style-panel/shared/css-value-input";
-import { useLocalValue } from "~/builder/features/settings-panel/shared";
+import { useDraftValue } from "~/builder/shared/use-draft-value";
 import { buildBreakpointFromEditorState } from "./breakpoint-editor-utils";
+import { executeRuntimeMutation } from "~/shared/instance-utils/data";
 
 type BreakpointEditorItemProps = {
   breakpoint: Breakpoint;
@@ -57,7 +64,7 @@ const BreakpointEditorItem = ({
     ]
   );
 
-  const localValue = useLocalValue(
+  const localValue = useDraftValue(
     initialValue,
     (value) => {
       const newBreakpoint = buildBreakpointFromEditorState(
@@ -77,11 +84,22 @@ const BreakpointEditorItem = ({
   );
 
   const hasCondition = localValue.value.condition.trim() !== "";
+  const hasName = localValue.value.label.trim() !== "";
 
   return (
-    <Flex gap="2">
-      <Flex direction="column" gap="1">
+    <Flex
+      direction="column"
+      gap="2"
+      css={{
+        [`&:hover [data-breakpoint-delete], &:focus-within [data-breakpoint-delete]`]:
+          {
+            visibility: "visible",
+          },
+      }}
+    >
+      <Flex gap="2">
         <InputField
+          variant="chromeless"
           type="text"
           value={localValue.value.label}
           onChange={(event) =>
@@ -93,6 +111,30 @@ const BreakpointEditorItem = ({
           required
           autoFocus={autoFocus}
         />
+        <IconButton
+          aria-label={`Delete breakpoint ${localValue.value.label}`}
+          data-breakpoint-delete
+          disabled={hasName === false}
+          css={{ visibility: "hidden" }}
+          onClick={() => {
+            const breakpointToDelete = buildBreakpointFromEditorState(
+              breakpoint.id,
+              localValue.value.label,
+              localValue.value.condition,
+              type,
+              localValue.value.width,
+              breakpoint
+            );
+            if (breakpointToDelete === undefined) {
+              return;
+            }
+            onDelete(breakpointToDelete);
+          }}
+        >
+          <TrashIcon />
+        </IconButton>
+      </Flex>
+      <Flex direction="column" gap="1">
         <Flex gap="2" css={{ width: theme.spacing[26] }}>
           <Select
             css={{ width: theme.spacing[28] }}
@@ -109,6 +151,7 @@ const BreakpointEditorItem = ({
           />
           <Box css={{ flexShrink: 1 }}>
             <CssValueInput
+              aria-label="Breakpoint width"
               styleSource="local"
               property="width"
               value={{
@@ -166,13 +209,6 @@ const BreakpointEditorItem = ({
           onBlur={localValue.save}
         />
       </Flex>
-      <IconButton
-        onClick={() => {
-          onDelete(breakpoint);
-        }}
-      >
-        <MinusIcon />
-      </IconButton>
     </Flex>
   );
 };
@@ -211,12 +247,40 @@ export const BreakpointsEditor = ({
   );
 
   const handleChangeComplete = (breakpoint: Breakpoint) => {
-    serverSyncStore.createTransaction([$breakpoints], (breakpoints) => {
-      breakpoints.set(breakpoint.id, breakpoint);
+    if (breakpoints.has(breakpoint.id)) {
+      executeRuntimeMutation({
+        id: "breakpoints.update",
+        input: {
+          breakpointId: breakpoint.id,
+          values: {
+            label: breakpoint.label,
+            condition: breakpoint.condition ?? null,
+            minWidth: breakpoint.minWidth ?? null,
+            maxWidth: breakpoint.maxWidth ?? null,
+          },
+        },
+      });
+      return;
+    }
+
+    executeRuntimeMutation({
+      id: "breakpoints.create",
+      input: {
+        label: breakpoint.label,
+        condition: breakpoint.condition,
+        minWidth: breakpoint.minWidth,
+        maxWidth: breakpoint.maxWidth,
+      },
     });
+    setAddedBreakpoints((breakpoints) =>
+      breakpoints.filter((item) => item.id !== breakpoint.id)
+    );
   };
 
   const handleOpenChange = (newOpen: boolean) => {
+    if (newOpen === false) {
+      setAddedBreakpoints([]);
+    }
     onOpenChange?.(newOpen);
   };
 
@@ -229,7 +293,12 @@ export const BreakpointsEditor = ({
             css={{ paddingInline: theme.panel.paddingInline }}
             suffix={
               <IconButton
+                aria-label="Add breakpoint"
                 onClick={() => {
+                  if (hasReachedBreakpointLimit(allBreakpoints.length)) {
+                    toast.warn(breakpointLimitWarning);
+                    return;
+                  }
                   const newBreakpoint: Breakpoint = {
                     id: nanoid(),
                     label: "",
@@ -245,28 +314,30 @@ export const BreakpointsEditor = ({
             {"Breakpoints"}
           </PanelTitle>
           <Separator />
-          <Fragment>
-            {allBreakpoints.map((breakpoint, index, all) => {
-              return (
-                <Fragment key={breakpoint.id}>
-                  <Box css={{ p: theme.panel.padding }}>
-                    <BreakpointEditorItem
-                      breakpoint={breakpoint}
-                      onChangeComplete={handleChangeComplete}
-                      onDelete={onDelete}
-                      autoFocus={index === 0}
-                    />
-                  </Box>
-                  {index < all.length - 1 && <PopoverSeparator />}
-                </Fragment>
-              );
-            })}
-          </Fragment>
-          {allBreakpoints.length === 0 && (
-            <Text css={{ margin: theme.spacing[10] }}>
-              No breakpoints found
-            </Text>
-          )}
+          <ScrollAreaNative css={{ maxHeight: "80vh" }}>
+            <Fragment>
+              {allBreakpoints.map((breakpoint, index, all) => {
+                return (
+                  <Fragment key={breakpoint.id}>
+                    <Box css={{ p: theme.panel.padding }}>
+                      <BreakpointEditorItem
+                        breakpoint={breakpoint}
+                        onChangeComplete={handleChangeComplete}
+                        onDelete={onDelete}
+                        autoFocus={index === 0}
+                      />
+                    </Box>
+                    {index < all.length - 1 && <PopoverSeparator />}
+                  </Fragment>
+                );
+              })}
+            </Fragment>
+            {allBreakpoints.length === 0 && (
+              <Text css={{ margin: theme.spacing[10] }}>
+                No breakpoints found
+              </Text>
+            )}
+          </ScrollAreaNative>
         </Flex>
       </PopoverContent>
     </Popover>

@@ -8,6 +8,7 @@ import {
   type Value,
 } from "css-tree";
 import warnOnce from "warn-once";
+import { shorthandExpansions } from "./__generated__/shorthand-expansions";
 
 const cssWideKeywordsSyntax = Array.from(cssWideKeywords).join(" | ");
 
@@ -157,6 +158,39 @@ const parseUnordered = (syntaxes: string[], value: CssNode) => {
   ];
 };
 
+const assignUnorderedNodes = (syntaxes: string[], value: CssNode) => {
+  const assigned = syntaxes.map(() => new List<CssNode>());
+  const unresolved = new List<CssNode>();
+
+  for (const node of getValueList(value)) {
+    const matchingIndexes: number[] = [];
+
+    syntaxes.forEach((syntax, index) => {
+      if (lexer.match(syntax, createValueNode([node])).matched) {
+        matchingIndexes.push(index);
+      }
+    });
+
+    if (matchingIndexes.length === 1) {
+      assigned[matchingIndexes[0]].appendData(node);
+      continue;
+    }
+
+    unresolved.appendData(node);
+  }
+
+  return {
+    assigned: assigned.map((list) => {
+      const nodes = list.toArray();
+      return nodes.length === 0 ? undefined : createValueNode(nodes);
+    }),
+    unresolved:
+      unresolved.isEmpty === false
+        ? createValueNode(unresolved.toArray())
+        : undefined,
+  };
+};
+
 /**
  *
  * border = <line-width> || <line-style> || <color>
@@ -297,7 +331,7 @@ const expandBorderImage = function* (value: CssNode) {
 /**
  *
  * font =
- *   [ <'font-style'> || <font-variant-css21> || <'font-weight'> || <'font-stretch'> ]?
+ *   [ <'font-style'> || <font-variant-css2> || <'font-weight'> || <'font-stretch'> ]?
  *   <'font-size'> [ / <'line-height'> ]? <'font-family'>
  *
  */
@@ -306,7 +340,7 @@ const expandFont = function* (value: CssNode) {
     parseUnordered(
       [
         "<'font-style'>",
-        "<font-variant-css21>",
+        "<font-variant-css2>",
         "<'font-weight'>",
         "<'font-stretch'>",
       ],
@@ -346,16 +380,28 @@ const expandFont = function* (value: CssNode) {
  *
  */
 const expandFontSynthesis = function* (value: CssNode) {
-  const [weight, style, smallCaps, position] = parseUnordered(
+  const {
+    assigned: [weight, style, smallCaps, position],
+    unresolved,
+  } = assignUnorderedNodes(
     ["weight", "style", "small-caps", "position"],
     value
   );
   const auto = createIdentifier("auto");
   const none = createIdentifier("none");
-  yield ["font-synthesis-weight", weight ? auto : none] as const;
-  yield ["font-synthesis-style", style ? auto : none] as const;
-  yield ["font-synthesis-small-caps", smallCaps ? auto : none] as const;
-  yield ["font-synthesis-position", position ? auto : none] as const;
+  yield [
+    "font-synthesis-weight",
+    weight ? auto : (unresolved ?? none),
+  ] as const;
+  yield ["font-synthesis-style", style ? auto : (unresolved ?? none)] as const;
+  yield [
+    "font-synthesis-small-caps",
+    smallCaps ? auto : (unresolved ?? none),
+  ] as const;
+  yield [
+    "font-synthesis-position",
+    position ? auto : (unresolved ?? none),
+  ] as const;
 };
 
 /**
@@ -374,27 +420,40 @@ const expandFontSynthesis = function* (value: CssNode) {
  *
  */
 const expandFontVariant = function* (value: CssNode) {
-  const [ligatures, caps, alternates, numeric, eastAsian, position, emoji] =
-    parseUnordered(
-      [
-        "[ normal | none | <common-lig-values> || <discretionary-lig-values> || <historical-lig-values> || <contextual-alt-values> ]",
-        "[ small-caps | all-small-caps | petite-caps | all-petite-caps | unicase | titling-caps ]",
-        "[ stylistic( <feature-value-name> ) || historical-forms || styleset( <feature-value-name># ) || character-variant( <feature-value-name># ) || swash( <feature-value-name> ) || ornaments( <feature-value-name> ) || annotation( <feature-value-name> ) ]",
-        "[ <numeric-figure-values> || <numeric-spacing-values> || <numeric-fraction-values> || ordinal || slashed-zero ]",
-        "[ <east-asian-variant-values> || <east-asian-width-values> || ruby ]",
-        "[ sub | super ]",
-        "[ text | emoji | unicode ]",
-      ],
-      value
-    );
+  const {
+    assigned: [
+      ligatures,
+      caps,
+      alternates,
+      numeric,
+      eastAsian,
+      position,
+      emoji,
+    ],
+    unresolved,
+  } = assignUnorderedNodes(
+    [
+      "[ normal | none | <common-lig-values> || <discretionary-lig-values> || <historical-lig-values> || <contextual-alt-values> ]",
+      "[ small-caps | all-small-caps | petite-caps | all-petite-caps | unicase | titling-caps ]",
+      "[ stylistic( <feature-value-name> ) || historical-forms || styleset( <feature-value-name># ) || character-variant( <feature-value-name># ) || swash( <feature-value-name> ) || ornaments( <feature-value-name> ) || annotation( <feature-value-name> ) ]",
+      "[ <numeric-figure-values> || <numeric-spacing-values> || <numeric-fraction-values> || ordinal || slashed-zero ]",
+      "[ <east-asian-variant-values> || <east-asian-width-values> || ruby ]",
+      "[ sub | super ]",
+      "[ text | emoji | unicode ]",
+    ],
+    value
+  );
   const normal = createIdentifier("normal");
-  yield ["font-variant-ligatures", ligatures ?? normal] as const;
-  yield ["font-variant-caps", caps ?? normal] as const;
-  yield ["font-variant-alternates", alternates ?? normal] as const;
-  yield ["font-variant-numeric", numeric ?? normal] as const;
-  yield ["font-variant-east-asian", eastAsian ?? normal] as const;
-  yield ["font-variant-position", position ?? normal] as const;
-  yield ["font-variant-emoji", emoji ?? normal] as const;
+  yield ["font-variant-ligatures", ligatures ?? unresolved ?? normal] as const;
+  yield ["font-variant-caps", caps ?? unresolved ?? normal] as const;
+  yield [
+    "font-variant-alternates",
+    alternates ?? unresolved ?? normal,
+  ] as const;
+  yield ["font-variant-numeric", numeric ?? unresolved ?? normal] as const;
+  yield ["font-variant-east-asian", eastAsian ?? unresolved ?? normal] as const;
+  yield ["font-variant-position", position ?? unresolved ?? normal] as const;
+  yield ["font-variant-emoji", emoji ?? unresolved ?? normal] as const;
 };
 
 const expandFlex = function* (value: CssNode) {
@@ -860,26 +919,41 @@ const expandWhiteSpace = function* (value: CssNode) {
   const preserveKeyword = createIdentifier("preserve");
   const wrapKeyword = createIdentifier("wrap");
   const nowrapKeyword = createIdentifier("nowrap");
-  let collapse = collapseKeyword;
-  let wrapMode = wrapKeyword;
-  [collapse = collapseKeyword, wrapMode = wrapKeyword] = parseUnordered(
+  if (lexer.match("normal", value).matched) {
+    yield ["white-space-collapse", collapseKeyword] as const;
+    yield ["text-wrap-mode", wrapKeyword] as const;
+    return;
+  }
+  if (lexer.match("pre", value).matched) {
+    yield ["white-space-collapse", preserveKeyword] as const;
+    yield ["text-wrap-mode", nowrapKeyword] as const;
+    return;
+  }
+  if (lexer.match("pre-wrap", value).matched) {
+    yield ["white-space-collapse", preserveKeyword] as const;
+    yield ["text-wrap-mode", wrapKeyword] as const;
+    return;
+  }
+  if (lexer.match("pre-line", value).matched) {
+    yield [
+      "white-space-collapse",
+      createIdentifier("preserve-breaks"),
+    ] as const;
+    yield ["text-wrap-mode", wrapKeyword] as const;
+    return;
+  }
+  const {
+    assigned: [collapse, wrapMode],
+    unresolved,
+  } = assignUnorderedNodes(
     ["<'white-space-collapse'>", "<'text-wrap-mode'>"],
     value
   );
-  if (lexer.match("normal", value).matched) {
-    [collapse, wrapMode] = [collapseKeyword, wrapKeyword];
-  }
-  if (lexer.match("pre", value).matched) {
-    [collapse, wrapMode] = [preserveKeyword, nowrapKeyword];
-  }
-  if (lexer.match("pre-wrap", value).matched) {
-    [collapse, wrapMode] = [preserveKeyword, wrapKeyword];
-  }
-  if (lexer.match("pre-line", value).matched) {
-    [collapse, wrapMode] = [createIdentifier("preserve-breaks"), wrapKeyword];
-  }
-  yield ["white-space-collapse", collapse] as const;
-  yield ["text-wrap-mode", wrapMode] as const;
+  yield [
+    "white-space-collapse",
+    collapse ?? unresolved ?? collapseKeyword,
+  ] as const;
+  yield ["text-wrap-mode", wrapMode ?? unresolved ?? wrapKeyword] as const;
 };
 
 /**
@@ -1012,6 +1086,85 @@ const expandBackground = function* (value: CssNode) {
   yield ["background-origin", origin] as const;
   yield ["background-clip", clip] as const;
   yield ["background-color", backgroundColor] as const;
+};
+
+type SyntaxMatch = {
+  syntax?: { type: string; name?: string } | null;
+  match?: SyntaxMatch[];
+  node?: CssNode;
+};
+
+const markNodeTree = (node: CssNode, seen: Set<CssNode>) => {
+  seen.add(node);
+  const children = "children" in node ? node.children : undefined;
+  if (children != null) {
+    for (const child of children) {
+      markNodeTree(child, seen);
+    }
+  }
+};
+
+const getMatchedNodes = (
+  match: SyntaxMatch,
+  nodes: CssNode[] = [],
+  seen = new Set<CssNode>()
+) => {
+  if (match.node !== undefined && seen.has(match.node) === false) {
+    markNodeTree(match.node, seen);
+    nodes.push(match.node);
+    return nodes;
+  }
+  for (const child of match.match ?? []) {
+    getMatchedNodes(child, nodes, seen);
+  }
+  return nodes;
+};
+
+const expandSyntaxShorthand = (property: string, value: CssNode) => {
+  if (Object.hasOwn(shorthandExpansions, property) === false) {
+    return;
+  }
+
+  const expansion = shorthandExpansions[
+    property as keyof typeof shorthandExpansions
+  ] as Record<string, string>;
+  const longhands = new Set(Object.keys(expansion));
+
+  const result = lexer.matchProperty(property, value);
+  if (result.matched === null) {
+    return Object.keys(expansion).map((longhand) => [longhand, value] as const);
+  }
+
+  const matches = new Map<string, Value>();
+  let hasRepeatedMatch = false;
+  const visit = (match: SyntaxMatch) => {
+    const matchedProperty = match.syntax?.name;
+    if (
+      match.syntax?.type === "Property" &&
+      matchedProperty !== undefined &&
+      longhands.has(matchedProperty)
+    ) {
+      if (matches.has(matchedProperty)) {
+        hasRepeatedMatch = true;
+        return;
+      }
+      matches.set(matchedProperty, createValueNode(getMatchedNodes(match)));
+      return;
+    }
+    for (const child of match.match ?? []) {
+      visit(child);
+    }
+  };
+  visit(result.matched as SyntaxMatch);
+
+  if (hasRepeatedMatch) {
+    return;
+  }
+
+  return Object.entries(expansion).map(([longhand, initial]) => {
+    const matched = matches.get(longhand);
+    return [longhand, matched ?? parse(initial, { context: "value" })] as const;
+  });
 };
 
 const expandShorthand = function* (property: string, value: CssNode) {
@@ -1237,21 +1390,6 @@ const expandShorthand = function* (property: string, value: CssNode) {
       break;
     }
 
-    case "column-rule": {
-      const [width, style, color] = parseUnordered(
-        [
-          "<'column-rule-width'>",
-          "<'column-rule-style'>",
-          "<'column-rule-color'>",
-        ],
-        value
-      );
-      yield ["column-rule-width", width ?? createInitialNode()] as const;
-      yield ["column-rule-style", style ?? createInitialNode()] as const;
-      yield ["column-rule-color", color ?? createInitialNode()] as const;
-      break;
-    }
-
     case "list-style": {
       const [position, image, type] = parseUnordered(
         [
@@ -1332,13 +1470,6 @@ const expandShorthand = function* (property: string, value: CssNode) {
       break;
     }
 
-    case "container": {
-      const [name, type] = splitByOperator(value, "/");
-      yield ["container-name", name ?? createIdentifier("none")] as const;
-      yield ["container-type", type ?? createIdentifier("normal")] as const;
-      break;
-    }
-
     case "contain-intrinsic-size": {
       const [width, height] = parseUnordered(
         [`<'contain-intrinsic-width'>`, `<'contain-intrinsic-height'>`],
@@ -1360,12 +1491,21 @@ const expandShorthand = function* (property: string, value: CssNode) {
       break;
 
     case "text-wrap": {
-      const [
-        mode = createIdentifier("wrap"),
-        style = createIdentifier("auto"),
-      ] = parseUnordered(["<'text-wrap-mode'>", "<'text-wrap-style'>"], value);
-      yield ["text-wrap-mode", mode] as const;
-      yield ["text-wrap-style", style] as const;
+      const {
+        assigned: [mode, style],
+        unresolved,
+      } = assignUnorderedNodes(
+        ["<'text-wrap-mode'>", "<'text-wrap-style'>"],
+        value
+      );
+      yield [
+        "text-wrap-mode",
+        mode ?? unresolved ?? createIdentifier("wrap"),
+      ] as const;
+      yield [
+        "text-wrap-style",
+        style ?? unresolved ?? createIdentifier("auto"),
+      ] as const;
       break;
     }
 
@@ -1394,27 +1534,35 @@ const expandShorthand = function* (property: string, value: CssNode) {
       break;
     }
 
-    case "position-try": {
-      const [order, options] = parseUnordered(
-        [
-          `normal | most-width | most-height | most-block-size | most-inline-size`,
-          `none | [ [<custom-ident> || flip-block || flip-inline || flip-start] | inset-area( <'inset-area'> ) ]#`,
-        ],
+    // -webkit-text-stroke = <line-width> || <color>
+    // Sets width/color together with standard shorthand reset semantics.
+    case "-webkit-text-stroke": {
+      const [width, color] = parseUnordered(
+        [`<'-webkit-text-stroke-width'>`, `<'-webkit-text-stroke-color'>`],
         value
       );
+      yield ["-webkit-text-stroke-width", width ?? createNumber("0")] as const;
       yield [
-        "position-try-order",
-        order ?? createIdentifier("normal"),
-      ] as const;
-      yield [
-        "position-try-options",
-        options ?? createIdentifier("none"),
+        "-webkit-text-stroke-color",
+        color ?? createIdentifier("currentcolor"),
       ] as const;
       break;
     }
 
+    // marker = none | <url>
+    // Shorthand for marker-start, marker-mid, and marker-end.
+    // All three longhands receive the same value.
+    case "marker": {
+      yield ["marker-start", value] as const;
+      yield ["marker-mid", value] as const;
+      yield ["marker-end", value] as const;
+      break;
+    }
+
     default:
-      yield [property, value] as const;
+      yield* (
+        expandSyntaxShorthand(property, value) ?? [[property, value] as const]
+      );
   }
 };
 

@@ -4,29 +4,39 @@ import {
   useState,
   type ComponentProps,
   type JSX,
+  type PointerEvent,
 } from "react";
-import type { AssetType } from "@webstudio-is/asset-uploader";
 import {
+  ContextMenu,
+  ContextMenuTrigger,
   Flex,
-  ScrollArea,
+  ScrollAreaNative,
   SearchField,
-  Text,
   theme,
+  toast,
 } from "@webstudio-is/design-system";
-import { acceptUploadType, validateFiles } from "./asset-upload";
-import { detectAssetType } from "@webstudio-is/sdk";
-import { NotFound } from "./not-found";
+import { autoScrollForElements } from "@atlaskit/pragmatic-drag-and-drop-auto-scroll/element";
+import {
+  acceptUploadType,
+  groupFilesByAssetType,
+  validateFiles,
+} from "./asset-upload";
+import { AssetPanelState } from "./asset-panel-state";
 import { Separator } from "./separator";
 import { combine } from "@atlaskit/pragmatic-drag-and-drop/combine";
-import {
-  containsFiles,
-  getFiles,
-} from "@atlaskit/pragmatic-drag-and-drop/external/file";
+import { containsFiles } from "@atlaskit/pragmatic-drag-and-drop/external/file";
 import { dropTargetForExternal } from "@atlaskit/pragmatic-drag-and-drop/external/adapter";
 import invariant from "tiny-invariant";
 import type { ContainsSource } from "@atlaskit/pragmatic-drag-and-drop/dist/types/public-utils/external/native-types";
 import { uploadAssets } from "./upload-assets";
-import { UploadIcon } from "@webstudio-is/icons";
+import {
+  createDroppedAssetFolderStructure,
+  readDroppedAssetItems,
+} from "./directory-drop";
+import { $assetFolders } from "~/shared/sync/data-stores";
+import { createAssetFolderHierarchy, type AssetType } from "@webstudio-is/sdk";
+import { executeRuntimeMutation } from "~/shared/instance-utils/data";
+import { onNextTransactionComplete } from "~/shared/sync/project-queue";
 import {
   IDLE,
   isBlockedByBackdrop,
@@ -39,9 +49,24 @@ type AssetsShellProps = {
   filters?: JSX.Element;
   searchProps: ComponentProps<typeof SearchField>;
   children: JSX.Element;
+  interactionOverlay?: JSX.Element;
+  footer?: JSX.Element;
   type: AssetType;
   accept?: string;
   isEmpty: boolean;
+  emptyMessage?: string;
+  emptyContent?: JSX.Element;
+  folderId?: string;
+  contextMenu?: JSX.Element;
+  onContextMenu?: ComponentProps<typeof Flex>["onContextMenu"];
+  onPointerDown?: (
+    event: PointerEvent<HTMLElement>,
+    listViewport: HTMLElement | null
+  ) => void;
+  onKeyDown?: ComponentProps<typeof Flex>["onKeyDown"];
+  onElementChange?: (element: HTMLDivElement | null) => void;
+  autoScrollOnElementDrag?: boolean;
+  allowFolderDrop?: boolean;
 };
 
 const containsFilesOrUri = (parameter: ContainsSource) => {
@@ -53,19 +78,77 @@ const containsFilesOrUri = (parameter: ContainsSource) => {
 const OVER = 2;
 type DropTargetState = typeof IDLE | typeof OVER;
 
+const uploadDroppedFiles = ({
+  files,
+  type,
+  accept,
+  folderId,
+}: {
+  files: File[];
+  type: AssetType;
+  accept?: string;
+  folderId?: string;
+}) => {
+  const validFiles = validateFiles(files).filter((file) => {
+    if (acceptUploadType(type, accept, file)) {
+      return true;
+    }
+
+    console.warn(
+      `Unsupported file dropped for type=${type}, accept=${accept} and file.type=${file.type}, file.name=${file.name}`
+    );
+    return false;
+  });
+
+  for (const [detectedType, filesOfType] of groupFilesByAssetType(validFiles)) {
+    uploadAssets(detectedType, filesOfType, { folderId });
+  }
+};
+
 export const AssetsShell = ({
   filters,
   searchProps,
   isEmpty,
+  emptyMessage,
+  emptyContent,
   children,
+  interactionOverlay,
+  footer,
+  folderId,
+  contextMenu,
+  onContextMenu,
+  onPointerDown,
+  onKeyDown,
+  onElementChange,
+  autoScrollOnElementDrag = false,
+  allowFolderDrop = false,
   type,
   accept,
 }: AssetsShellProps) => {
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const listViewportRef = useRef<HTMLDivElement | null>(null);
   const [monitorState, setMonitorState] =
     useState<ExternalMonitorDragState>(IDLE);
 
   const [dropTargetState, setDropTargetState] = useState<DropTargetState>(IDLE);
+  const dropMessage = allowFolderDrop
+    ? "Drop files or folders here"
+    : "Drop files here";
+  const dropDescription = allowFolderDrop
+    ? "Drop files or folders from your computer into this panel."
+    : "Drop files from anywhere into this panel.";
+  const resolvedEmptyMessage = emptyMessage ?? dropMessage;
+
+  useEffect(() => {
+    const element = listViewportRef.current;
+    if (element === null || autoScrollOnElementDrag === false) {
+      return;
+    }
+    return autoScrollForElements({
+      element,
+      getAllowedAxis: () => "vertical",
+    });
+  }, [autoScrollOnElementDrag, isEmpty]);
 
   useExternalDragStateEffect((state) => {
     const element = ref.current;
@@ -121,7 +204,8 @@ export const AssetsShell = ({
           setMonitorState(IDLE);
           setDropTargetState(IDLE);
 
-          const droppedUrls = await Promise.all(
+          const droppedItemsPromise = readDroppedAssetItems(source.items);
+          const droppedUrlsPromise = Promise.all(
             source.items
               .filter((item) => item.type === "text/uri-list")
               .map(
@@ -131,53 +215,94 @@ export const AssetsShell = ({
                   )
               )
           );
+          try {
+            const [droppedItems, droppedUrls] = await Promise.all([
+              droppedItemsPromise,
+              droppedUrlsPromise,
+            ]);
+            let didCreateFolder = false;
+            const fileGroups = allowFolderDrop
+              ? await createDroppedAssetFolderStructure({
+                  directories: droppedItems.directories,
+                  parentFolderId: folderId,
+                  getOrCreateFolder: (name, parentId) => {
+                    const hierarchy = createAssetFolderHierarchy(
+                      $assetFolders.get()
+                    );
+                    const existing = hierarchy.findByName({ name, parentId });
+                    if (existing !== undefined) {
+                      return existing.id;
+                    }
+                    didCreateFolder = true;
+                    const result = executeRuntimeMutation({
+                      id: "assetFolders.create",
+                      input: { name, parentId },
+                    });
+                    if (result === undefined) {
+                      throw new Error(
+                        `Unable to create asset folder "${name}"`
+                      );
+                    }
+                    return result.result.folderId;
+                  },
+                })
+              : [];
 
-          const droppedFiles = validateFiles(getFiles({ source }));
-
-          const files = droppedFiles
-            .filter((file) => file != null)
-            .filter((file) => {
-              if (acceptUploadType(type, accept, file)) {
-                return true;
-              }
-
-              console.warn(
-                `Unsupported file dropped for type=${type}, accept=${accept} and file.type=${file.type}, file.name=${file.name}`
-              );
-              return false;
-            });
-
-          // Group files by their detected type
-          const filesByType = new Map<string, File[]>();
-          for (const file of files) {
-            const detectedType = detectAssetType(file.name);
-            if (!filesByType.has(detectedType)) {
-              filesByType.set(detectedType, []);
+            if (
+              allowFolderDrop === false &&
+              droppedItems.directories.length > 0
+            ) {
+              toast.error("Folder upload is only available in Assets.");
             }
-            filesByType.get(detectedType)!.push(file);
-          }
 
-          // Upload each group with the correct type
-          for (const [detectedType, filesOfType] of filesByType) {
-            uploadAssets(detectedType as AssetType, filesOfType);
-          }
+            const uploadFolderFiles = () => {
+              for (const { files, folderId } of fileGroups) {
+                uploadDroppedFiles({
+                  files,
+                  type,
+                  accept,
+                  folderId,
+                });
+              }
+            };
+            if (didCreateFolder && fileGroups.length > 0) {
+              onNextTransactionComplete(uploadFolderFiles);
+            } else {
+              uploadFolderFiles();
+            }
 
-          uploadAssets(type, droppedUrls);
+            uploadDroppedFiles({
+              files: droppedItems.files,
+              type,
+              accept,
+              folderId,
+            });
+            uploadAssets(type, droppedUrls, { folderId });
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : String(error));
+          }
         },
       })
     );
-  }, [accept, containsByType, type]);
+  }, [accept, allowFolderDrop, containsByType, folderId, type]);
 
   const dragState = Math.max(monitorState, dropTargetState);
 
-  return (
+  const shell = (
     <Flex
-      ref={ref}
+      ref={(element) => {
+        ref.current = element;
+        onElementChange?.(element);
+      }}
+      onPointerDown={(event) => onPointerDown?.(event, listViewportRef.current)}
+      onContextMenu={onContextMenu}
+      onKeyDown={onKeyDown}
       direction="column"
       css={{
         overflow: "hidden",
         paddingBlock: theme.panel.paddingBlock,
         flex: 1,
+        minHeight: 0,
         position: "relative",
       }}
     >
@@ -196,39 +321,67 @@ export const AssetsShell = ({
         {filters}
       </Flex>
       <Separator />
-      {isEmpty && <NotFound />}
-      <ScrollArea css={{ display: "flex", flexDirection: "column" }}>
-        {children}
-      </ScrollArea>
+      {isEmpty ? (
+        <Flex
+          direction="column"
+          css={{ flex: 1, minHeight: 0, position: "relative" }}
+        >
+          {emptyContent}
+          <AssetPanelState
+            overlay={emptyContent !== undefined}
+            message={resolvedEmptyMessage}
+            active={dragState === OVER}
+            description={
+              emptyMessage === undefined ? dropDescription : undefined
+            }
+          />
+        </Flex>
+      ) : (
+        <ScrollAreaNative
+          data-asset-manager-scroll-area=""
+          ref={listViewportRef}
+          style={{ overflowY: "auto" }}
+          css={{
+            display: "flex",
+            flexDirection: "column",
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
+          {children}
+        </ScrollAreaNative>
+      )}
+      {interactionOverlay}
+      {footer}
       <Flex
         css={{
           position: "absolute",
           inset: 0,
-          display: dragState !== IDLE ? "flex" : "none",
+          display: dragState !== IDLE && isEmpty === false ? "flex" : "none",
           backgroundColor: theme.colors.backgroundPanel,
-          opacity: 0.85,
           color:
             dragState === OVER
               ? theme.colors.foregroundMain
               : theme.colors.foregroundSubtle,
         }}
       >
-        <Flex
-          align="center"
-          justify="center"
-          css={{
-            position: "absolute",
-            inset: theme.spacing[4],
-            border: `2px dashed ${dragState === OVER ? theme.colors.foregroundMain : theme.colors.foregroundMoreSubtle}`,
-          }}
-        >
-          <Flex align={"center"} gap={1}>
-            <UploadIcon />
-
-            <Text variant={"regularBold"}>Drop files here</Text>
-          </Flex>
-        </Flex>
+        <AssetPanelState
+          message={dropMessage}
+          description={dropDescription}
+          active={dragState === OVER}
+        />
       </Flex>
     </Flex>
+  );
+
+  if (contextMenu === undefined) {
+    return shell;
+  }
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{shell}</ContextMenuTrigger>
+      {contextMenu}
+    </ContextMenu>
   );
 };

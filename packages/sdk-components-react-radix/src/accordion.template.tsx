@@ -17,6 +17,7 @@ import {
   width,
 } from "./shared/theme";
 import { ChevronDownIcon } from "@webstudio-is/icons/svg";
+import { iconEmbedStyle } from "./shared/styles";
 
 const createAccordionItem = (triggerText: string, contentText: string) => {
   return (
@@ -38,7 +39,7 @@ const createAccordionItem = (triggerText: string, contentText: string) => {
             display: flex;
             flex: 1 1 0;
             align-items: center;
-            justify-content: between;
+            justify-content: space-between;
             padding: ${spacing[4]} 0;
             font-weight: ${weights.medium};
             --accordion-trigger-icon-transform: 0deg;
@@ -63,11 +64,16 @@ const createAccordionItem = (triggerText: string, contentText: string) => {
               transition-duration: 200ms;
             `}
           >
-            <$.HtmlEmbed ws:label="Chevron Icon" code={ChevronDownIcon} />
+            <$.HtmlEmbed
+              ws:label="Chevron Icon"
+              ws:style={iconEmbedStyle}
+              code={ChevronDownIcon}
+            />
           </$.Box>
         </radix.AccordionTrigger>
       </radix.AccordionHeader>
       <radix.AccordionContent
+        forceMount={true}
         // overflow-hidden text-sm transition-all data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down
         // pb-4 pt-0
         ws:style={css`
@@ -75,7 +81,12 @@ const createAccordionItem = (triggerText: string, contentText: string) => {
           font-size: ${fontSize.sm};
           line-height: ${fontSizeLineHeight.sm};
           transition: ${transition.all};
-          padding-bottom: ${spacing[4]};
+          &[data-state="closed"] {
+            height: 0;
+          }
+          &[data-state="open"] {
+            height: var(--radix-accordion-content-height);
+          }
         `}
       >
         {new PlaceholderValue(contentText)}

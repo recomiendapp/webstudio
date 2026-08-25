@@ -1,20 +1,17 @@
 // Story for image development, see https://github.com/webstudio-is/webstudio/issues/387
 
 import type * as React from "react";
-import type { Meta, StoryFn } from "@storybook/react";
-import { Image as ImagePrimitive, wsImageLoader } from "./";
+import { StorySection } from "@webstudio-is/design-system";
+import { getImageAttributes, wsImageLoader } from "./";
 
 // to not allow include local assets everywhere, just enable it for this file
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import localLogoImage from "../storybook-assets/logo.webp";
 
-const meta: Meta<typeof ImagePrimitive> = {
-  title: "Image Dev",
+export default {
+  title: "Image dev",
 };
-export default meta;
-
-type ImageProps = React.ComponentProps<typeof ImagePrimitive>;
 
 /**
  * In case you need to test img with real cloudflare trasforms
@@ -29,95 +26,115 @@ const imageSrc = USE_CLOUDFLARE_IMAGE_TRANSFORM
   ? REMOTE_SELF_DOMAIN_IMAGE
   : localLogoImage;
 
-const ImageBase = (
-  args: Omit<ImageProps, "loader"> & {
-    style?: React.HTMLAttributes<"img">["style"];
-  }
-) => {
+const ImageBase = ({
+  alt,
+  decoding,
+  height,
+  loading,
+  sizes,
+  src,
+  srcSet,
+  style: inputStyle,
+  width,
+  ...props
+}: React.ComponentPropsWithoutRef<"img">) => {
   const style = {
     maxWidth: "100%",
     display: "block",
-    ...args.style,
+    ...inputStyle,
   };
 
   return (
-    <ImagePrimitive
-      {...args}
-      optimize={true}
-      loader={wsImageLoader}
+    <img
+      {...props}
       style={style}
+      {...getImageAttributes({
+        alt,
+        decoding,
+        height,
+        loading,
+        sizes,
+        src,
+        srcSet,
+        width,
+        optimize: true,
+        loader: wsImageLoader,
+      })}
     />
   );
 };
 
-/**
- * Load images depending on image width and device per pixel ratio.
- **/
-export const FixedWidthImage: StoryFn<React.FunctionComponent> = () => (
-  <ImageBase src={imageSrc} width="300" height="400" />
+const SectionTitle = ({ children }: { children: React.ReactNode }) => (
+  <h3 style={{ marginTop: 24, marginBottom: 8 }}>{children}</h3>
 );
 
 /**
- * Preserve ratio using object-fit: cover. Load images depending on image width and device per pixel ratio.
+ * All image variants demonstrated together.
  **/
-export const FixedWidthImageCover: StoryFn<React.FunctionComponent> = () => (
-  <ImageBase
-    src={imageSrc}
-    width="300"
-    height="400"
-    style={{ objectFit: "cover" }}
-  />
-);
+export const ImageDev = (): React.JSX.Element => (
+  <StorySection title="Image Dev">
+    <SectionTitle>Fixed width image</SectionTitle>
+    <p>Load images depending on image width and device per pixel ratio.</p>
+    <ImageBase src={imageSrc} width="300" height="400" />
 
-/**
- * Load images depending on the viewport width.
- **/
-export const UnknownWidthImage: StoryFn<React.FunctionComponent> = () => (
-  <ImageBase src={imageSrc} />
-);
-
-/**
- * Fit width of the parent container, has own aspect-ratio and object-fit=cover.
- * Load images depending on the viewport width.
- **/
-export const AspectRatioImage: StoryFn<React.FunctionComponent> = () => (
-  <div style={{ width: "50%" }}>
+    <SectionTitle>Fixed width image (cover)</SectionTitle>
+    <p>
+      Preserve ratio using object-fit: cover. Load images depending on image
+      width and device per pixel ratio.
+    </p>
     <ImageBase
       src={imageSrc}
-      style={{ aspectRatio: "2/1", objectFit: "cover", width: "100%" }}
+      width="300"
+      height="400"
+      style={{ objectFit: "cover" }}
     />
-  </div>
-);
 
-/**
- * Fill width and height of the relative parent container, object-fit=cover. Load images depending on the viewport width.
- **/
-export const FillParentImage: StoryFn<React.FunctionComponent> = () => (
-  <div style={{ width: "50%", aspectRatio: "2/1", position: "relative" }}>
+    <SectionTitle>Unknown width image</SectionTitle>
+    <p>Load images depending on the viewport width.</p>
+    <ImageBase src={imageSrc} />
+
+    <SectionTitle>Aspect ratio image</SectionTitle>
+    <p>
+      Fit width of the parent container, has own aspect-ratio and
+      object-fit=cover. Load images depending on the viewport width.
+    </p>
+    <div style={{ width: "50%" }}>
+      <ImageBase
+        src={imageSrc}
+        style={{ aspectRatio: "2/1", objectFit: "cover", width: "100%" }}
+      />
+    </div>
+
+    <SectionTitle>Fill parent image</SectionTitle>
+    <p>
+      Fill width and height of the relative parent container, object-fit=cover.
+      Load images depending on the viewport width.
+    </p>
+    <div style={{ width: "50%", aspectRatio: "2/1", position: "relative" }}>
+      <ImageBase
+        src={imageSrc}
+        style={{
+          objectFit: "cover",
+          position: "absolute",
+          width: "100%",
+          height: "100%",
+        }}
+      />
+    </div>
+
+    <SectionTitle>Hero image</SectionTitle>
+    <p>
+      &quot;sizes&quot; attribute explicitly equal to 100vw allowing to skip the
+      default behavior. Load images depending on the viewport width.
+    </p>
     <ImageBase
       src={imageSrc}
+      sizes="100vw"
       style={{
+        aspectRatio: "3/1",
         objectFit: "cover",
-        position: "absolute",
         width: "100%",
-        height: "100%",
       }}
     />
-  </div>
-);
-
-/**
- * "sizes" attribute explicitly equal to 100vw allowing to skip the default behavior.
- * See DEFAULT_SIZES in the Image component. Load images depending on the viewport width.
- **/
-export const HeroImage: StoryFn<React.FunctionComponent> = () => (
-  <ImageBase
-    src={imageSrc}
-    sizes="100vw"
-    style={{
-      aspectRatio: "3/1",
-      objectFit: "cover",
-      width: "100%",
-    }}
-  />
+  </StorySection>
 );

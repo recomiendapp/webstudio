@@ -1,76 +1,57 @@
-import type { Instance, Instances } from "@webstudio-is/sdk";
-import { blockTemplateComponent } from "@webstudio-is/sdk";
-import { shallowEqual } from "shallow-equal";
-import { selectInstance } from "~/shared/awareness";
-import { findAvailableVariables } from "~/shared/data-variables";
+import type { WebstudioFragment } from "@webstudio-is/sdk";
+import { findTextEditorTarget } from "@webstudio-is/project-build/runtime";
 import {
-  extractWebstudioFragment,
-  findAllEditableInstanceSelector,
+  executeRuntimeMutationAsync,
   getWebstudioData,
-  insertInstanceChildrenMutable,
-  insertWebstudioFragmentCopy,
-  updateWebstudioData,
-  insertFragmentWithConflictResolution,
-} from "~/shared/instance-utils";
+} from "~/shared/instance-utils/data";
+import { insertWebstudioFragmentAt } from "~/shared/instance-utils/insert";
 import {
-  $instances,
-  $project,
-  $registeredComponentMetas,
-  $textEditingInstanceSelector,
-  findBlockChildSelector,
-  findBlockSelector,
+  detectFragmentTokenConflicts,
+  extractWebstudioFragment,
+} from "@webstudio-is/project-build/runtime";
+import {
+  $selectedInstanceSelector,
+  selectInstance,
 } from "~/shared/nano-states";
-import type { DroppableTarget, InstanceSelector } from "~/shared/tree-utils";
+import { resolveTokenConflicts } from "~/shared/resolve-token-conflicts";
+import {
+  $registeredComponentMetas,
+  $isContentMode,
+  $textEditingInstanceSelector,
+} from "~/shared/nano-states";
+import { $instances } from "~/shared/sync/data-stores";
+import { $project } from "~/shared/sync/data-stores";
+import type {
+  DroppableTarget,
+  InstanceSelector,
+} from "@webstudio-is/project-build/runtime";
+import {
+  findBlockSelector,
+  getBlockTemplateInsertionIndex,
+} from "@webstudio-is/project-build/runtime";
 
-const getInsertionIndex = (
-  anchor: InstanceSelector,
-  instances: Instances,
-  insertBefore: boolean = false
-) => {
-  const blockSelector = findBlockSelector(anchor, instances);
-  if (blockSelector === undefined) {
-    return;
+const getTemplateTokenConflicts = ({
+  fragment,
+  targetData,
+  contentMode,
+  detect = detectFragmentTokenConflicts,
+}: {
+  fragment: WebstudioFragment;
+  targetData: ReturnType<typeof getWebstudioData>;
+  contentMode: boolean;
+  detect?: typeof detectFragmentTokenConflicts;
+}) => {
+  if (contentMode) {
+    return [];
   }
-
-  const insertAtInitialPosition = shallowEqual(blockSelector, anchor);
-
-  const blockInstance = instances.get(blockSelector[0]);
-
-  if (blockInstance === undefined) {
-    return;
-  }
-
-  const childBlockSelector = findBlockChildSelector(anchor);
-
-  if (childBlockSelector === undefined) {
-    return;
-  }
-
-  const index = blockInstance.children.findIndex((child) => {
-    if (child.type !== "id") {
-      return false;
-    }
-
-    if (insertAtInitialPosition) {
-      return instances.get(child.value)?.component === blockTemplateComponent;
-    }
-
-    return child.value === childBlockSelector[0];
-  });
-
-  if (index === -1) {
-    return;
-  }
-
-  // Independent of insertBefore, we always insert after the Templates instance
-  if (insertAtInitialPosition) {
-    return index + 1;
-  }
-
-  return insertBefore ? index : index + 1;
+  return detect({ fragment, targetData });
 };
 
-export const insertListItemAt = (listItemSelector: InstanceSelector) => {
+export const __testing__ = {
+  getTemplateTokenConflicts,
+};
+
+export const insertListItemAt = async (listItemSelector: InstanceSelector) => {
   const project = $project.get();
   const instances = $instances.get();
   if (project === undefined) {
@@ -105,42 +86,36 @@ export const insertListItemAt = (listItemSelector: InstanceSelector) => {
     listItemSelector[0]
   );
 
-  fragment.instances = structuredClone(fragment.instances);
-  fragment.instances.splice(1);
-  fragment.instances[0].children = [];
+  const [listItemInstance] = fragment.instances;
+  if (listItemInstance === undefined) {
+    return;
+  }
+  fragment.instances = [{ ...listItemInstance, children: [] }];
+  fragment.children = [{ type: "id", value: listItemInstance.id }];
 
-  updateWebstudioData((data) => {
-    const { newInstanceIds } = insertWebstudioFragmentCopy({
-      data,
+  const result = await executeRuntimeMutationAsync({
+    id: "instances.insertFragment",
+    input: {
+      parentInstanceId: target.parentSelector[0],
       fragment,
-      availableVariables: findAvailableVariables({
-        ...data,
-        startingInstanceId: target.parentSelector[0],
-      }),
-      projectId: project.id,
-    });
-    const newRootInstanceId = newInstanceIds.get(fragment.instances[0].id);
-    if (newRootInstanceId === undefined) {
-      return;
-    }
-    const children: Instance["children"] = [
-      { type: "id", value: newRootInstanceId },
-    ];
-
-    insertInstanceChildrenMutable(data, children, target);
-
-    const selectedInstanceSelector = [
-      newRootInstanceId,
-      ...target.parentSelector,
-    ];
-
-    $textEditingInstanceSelector.set({
-      selector: selectedInstanceSelector,
-      reason: "new",
-    });
-
-    selectInstance(selectedInstanceSelector);
+      insertIndex: target.position === "end" ? undefined : target.position,
+    },
   });
+  const newRootInstanceId = result?.result.rootInstanceIds[0];
+  if (newRootInstanceId === undefined) {
+    return;
+  }
+  const selectedInstanceSelector = [
+    newRootInstanceId,
+    ...target.parentSelector,
+  ];
+
+  $textEditingInstanceSelector.set({
+    selector: selectedInstanceSelector,
+    reason: "new",
+  });
+
+  selectInstance(selectedInstanceSelector);
 };
 
 export const insertTemplateAt = async (
@@ -148,24 +123,24 @@ export const insertTemplateAt = async (
   anchor: InstanceSelector,
   insertBefore: boolean
 ) => {
-  const project = $project.get();
   const instances = $instances.get();
-  if (project === undefined) {
-    return;
-  }
 
   const fragment = extractWebstudioFragment(
     getWebstudioData(),
     templateSelector[0]
   );
 
-  const parentSelector = findBlockSelector(anchor, instances);
+  const parentSelector = findBlockSelector({ anchor, instances });
 
   if (parentSelector === undefined) {
     return;
   }
 
-  const position = getInsertionIndex(anchor, instances, insertBefore);
+  const position = getBlockTemplateInsertionIndex({
+    anchor,
+    instances,
+    insertBefore,
+  });
 
   if (position === undefined) {
     return;
@@ -177,59 +152,42 @@ export const insertTemplateAt = async (
   };
 
   try {
-    const conflictResolution = await insertFragmentWithConflictResolution({
+    const contentMode = $isContentMode.get();
+    const conflicts = getTemplateTokenConflicts({
       fragment,
+      targetData: getWebstudioData(),
+      contentMode,
     });
+    const conflictResolution = await resolveTokenConflicts(conflicts);
+    if (conflictResolution === "cancel") {
+      return;
+    }
 
-    updateWebstudioData((data) => {
-      const { newInstanceIds } = insertWebstudioFragmentCopy({
-        data,
-        fragment,
-        availableVariables: findAvailableVariables({
-          ...data,
-          startingInstanceId: target.parentSelector[0],
-        }),
-        projectId: project.id,
-        conflictResolution,
-      });
-      const newRootInstanceId = newInstanceIds.get(fragment.instances[0].id);
-      if (newRootInstanceId === undefined) {
-        return;
-      }
-      const children: Instance["children"] = [
-        { type: "id", value: newRootInstanceId },
-      ];
-
-      insertInstanceChildrenMutable(data, children, target);
-
-      const selectedInstanceSelector = [
-        newRootInstanceId,
-        ...target.parentSelector,
-      ];
-
-      const selectors: InstanceSelector[] = [];
-
-      findAllEditableInstanceSelector({
-        instanceSelector: selectedInstanceSelector,
-        instances: data.instances,
-        props: data.props,
-        metas: $registeredComponentMetas.get(),
-        results: selectors,
-      });
-
-      const editableInstanceSelector = selectors[0];
-
-      if (editableInstanceSelector) {
-        $textEditingInstanceSelector.set({
-          selector: editableInstanceSelector,
-          reason: "new",
-        });
-      } else {
-        $textEditingInstanceSelector.set(undefined);
-      }
-
-      selectInstance([newRootInstanceId, ...target.parentSelector]);
+    const didInsert = await insertWebstudioFragmentAt(
+      fragment,
+      target,
+      conflictResolution,
+      { contentMode }
+    );
+    if (didInsert === false) {
+      return;
+    }
+    const selectedInstanceSelector = $selectedInstanceSelector.get();
+    if (selectedInstanceSelector === undefined) {
+      return;
+    }
+    const data = getWebstudioData();
+    const editableInstanceSelector = findTextEditorTarget({
+      instanceSelector: selectedInstanceSelector,
+      instances: data.instances,
+      props: data.props,
+      metas: $registeredComponentMetas.get(),
     });
+    $textEditingInstanceSelector.set(
+      editableInstanceSelector
+        ? { selector: editableInstanceSelector, reason: "new" }
+        : undefined
+    );
   } catch {
     // User cancelled the operation
     return;

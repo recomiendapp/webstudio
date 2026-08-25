@@ -1,85 +1,100 @@
 import { join } from "node:path";
-import { readFile, rm } from "node:fs/promises";
-import { isPathnamePattern, type WsComponentMeta } from "@webstudio-is/sdk";
-import * as baseComponentMetas from "@webstudio-is/sdk-components-react/metas";
-import * as animationComponentMetas from "@webstudio-is/sdk-components-animation/metas";
-import * as radixComponentMetas from "@webstudio-is/sdk-components-react-radix/metas";
-import type { Framework } from "./framework";
+import { readFile } from "node:fs/promises";
+import { isPathnamePattern, matchPathnameParams } from "@webstudio-is/sdk";
+import {
+  baseComponentImportSource,
+  createFrameworkComponentRegistry,
+} from "@webstudio-is/sdk-components-registry/framework";
+import {
+  cleanupFrameworkTemplates,
+  getFrameworkTemplatesDirectory,
+  type Framework,
+  type FrameworkOptions,
+} from "./framework";
 
 const generateVikeRoute = (pagePath: string) => {
   if (pagePath === "/") {
     return "index";
   }
-  return pagePath;
+  let route = pagePath;
+  const matches = [...matchPathnameParams(pagePath)].reverse();
+  for (const match of matches) {
+    const name = match.groups?.name;
+    if (name === undefined || match.index === undefined) {
+      continue;
+    }
+    route = `${route.slice(0, match.index)}@${name}${route.slice(match.index + match[0].length)}`;
+  }
+  return route;
 };
 
-export const createFramework = async (): Promise<Framework> => {
-  const routeTemplatesDir = join("app", "route-templates");
-
+export const createFramework = async (
+  options: FrameworkOptions = {}
+): Promise<Framework> => {
+  const templatesDirectory = getFrameworkTemplatesDirectory(options);
   const htmlPageTemplate = await readFile(
-    join(routeTemplatesDir, "html", "+Page.tsx"),
+    join(templatesDirectory, "html", "+Page.tsx"),
     "utf8"
   );
   const htmlHeadTemplate = await readFile(
-    join(routeTemplatesDir, "html", "+Head.tsx"),
+    join(templatesDirectory, "html", "+Head.tsx"),
     "utf8"
   );
   const htmlDataTemplate = await readFile(
-    join(routeTemplatesDir, "html", "+data.ts"),
+    join(templatesDirectory, "html", "+data.ts"),
     "utf8"
   );
 
   // cleanup route templates after reading to not bloat generated code
-  await rm(routeTemplatesDir, { recursive: true, force: true });
+  await cleanupFrameworkTemplates(options);
 
-  const base = "@webstudio-is/sdk-components-react";
-  const reactRadix = "@webstudio-is/sdk-components-react-radix";
-  const animation = "@webstudio-is/sdk-components-animation";
-  const components: Record<string, string> = {};
-  const metas: Record<string, WsComponentMeta> = {};
-  for (const [name, meta] of Object.entries(baseComponentMetas)) {
-    components[name] = `${base}:${name}`;
-    metas[name] = meta;
-  }
-  for (const [name, meta] of Object.entries(radixComponentMetas)) {
-    components[`${reactRadix}:${name}`] = `${reactRadix}:${name}`;
-    metas[`${reactRadix}:${name}`] = meta;
-  }
-  for (const [name, meta] of Object.entries(animationComponentMetas)) {
-    components[`${animation}:${name}`] = `${animation}:${name}`;
-    metas[`${animation}:${name}`] = meta;
-  }
+  const { components, metas, buildHooks } = createFrameworkComponentRegistry();
 
   return {
     metas,
     components,
+    componentBuildHooks: buildHooks,
     tags: {
-      textarea: `${base}:Textarea`,
-      input: `${base}:Input`,
-      select: `${base}:Select`,
+      textarea: `${baseComponentImportSource}:Textarea`,
+      input: `${baseComponentImportSource}:Input`,
+      select: `${baseComponentImportSource}:Select`,
+      a: `${baseComponentImportSource}:Link`,
     },
-    html: ({ pagePath }: { pagePath: string }) => {
-      // ignore dynamic pages in static export
-      if (isPathnamePattern(pagePath)) {
+    html: ({ pagePath, prerenderPaths = [] }) => {
+      if (pagePath === "/*") {
         return [];
       }
-      return [
+      const dynamic = isPathnamePattern(pagePath);
+      if (dynamic && prerenderPaths.length === 0) {
+        return [];
+      }
+      const route = generateVikeRoute(pagePath);
+      const entries = [
         {
-          file: join("pages", generateVikeRoute(pagePath), "+Page.tsx"),
+          file: join("pages", route, "+Page.tsx"),
           template: htmlPageTemplate,
         },
         {
-          file: join("pages", generateVikeRoute(pagePath), "+Head.tsx"),
+          file: join("pages", route, "+Head.tsx"),
           template: htmlHeadTemplate,
         },
         {
-          file: join("pages", generateVikeRoute(pagePath), "+data.ts"),
+          file: join("pages", route, "+data.ts"),
           template: htmlDataTemplate,
         },
       ];
+      if (dynamic) {
+        entries.push({
+          file: join("pages", route, "+onBeforePrerenderStart.ts"),
+          template: `export const onBeforePrerenderStart = () => ${JSON.stringify(
+            prerenderPaths
+          )};\n`,
+        });
+      }
+      return entries;
     },
     xml: () => [],
-    redirect: () => [],
+    text: () => [],
     defaultSitemap: () => [],
   };
 };

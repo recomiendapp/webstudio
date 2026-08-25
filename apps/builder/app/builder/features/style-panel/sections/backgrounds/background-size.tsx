@@ -3,8 +3,8 @@ import { toValue } from "@webstudio-is/css-engine";
 import { keywordValues, propertyDescriptions } from "@webstudio-is/css-data";
 import {
   type StyleValue,
-  TupleValue,
-  TupleValueItem,
+  tupleValue,
+  tupleValueItem,
 } from "@webstudio-is/css-engine";
 import { CssValueInputContainer } from "../../shared/css-value-input";
 import type { SetValue } from "../../shared/use-style-data";
@@ -35,13 +35,13 @@ const toTuple = (
   valueX?: StyleValue | string,
   valueY?: StyleValue | string
 ) => {
-  const parsedValue = TupleValue.safeParse(valueX);
+  const parsedValue = tupleValue.safeParse(valueX);
   if (parsedValue.success) {
     return parsedValue.data;
   }
 
-  const parsedValueX = valueX ? TupleValueItem.parse(valueX) : autoKeyword;
-  const parsedValueY = valueY ? TupleValueItem.parse(valueY) : parsedValueX;
+  const parsedValueX = valueX ? tupleValueItem.parse(valueX) : autoKeyword;
+  const parsedValueY = valueY ? tupleValueItem.parse(valueY) : parsedValueX;
 
   return {
     type: "tuple" as const,
@@ -49,7 +49,13 @@ const toTuple = (
   };
 };
 
-export const BackgroundSize = ({ index }: { index: number }) => {
+export const BackgroundSize = ({
+  index,
+  disabled,
+}: {
+  index: number;
+  disabled?: boolean;
+}) => {
   const property = "background-size";
   const styleDecl = useComputedStyleDecl(property);
   const styleValue = getRepeatedStyleItem(styleDecl, index);
@@ -88,6 +94,7 @@ export const BackgroundSize = ({ index }: { index: number }) => {
         <Select
           // show empty field instead of radix placeholder
           // like css value input does
+          disabled={disabled}
           placeholder=""
           options={selectOptions}
           value={selectValue}
@@ -144,6 +151,7 @@ export const BackgroundSize = ({ index }: { index: number }) => {
           />
 
           <CssValueInputContainer
+            disabled={disabled}
             property={property}
             styleSource="default"
             getOptions={() => customSizeOptions}
@@ -153,6 +161,7 @@ export const BackgroundSize = ({ index }: { index: number }) => {
           />
 
           <CssValueInputContainer
+            disabled={disabled}
             property={property}
             styleSource="default"
             getOptions={() => customSizeOptions}

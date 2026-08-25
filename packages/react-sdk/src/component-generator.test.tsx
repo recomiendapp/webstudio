@@ -1,12 +1,12 @@
-import ts from "typescript";
-import { expect, test } from "vitest";
+import { API, type Snapshot } from "typescript/unstable/sync";
+import { afterAll, beforeAll, expect, test } from "vitest";
 import stripIndent from "strip-indent";
 import {
   createScope,
   elementComponent,
   ROOT_INSTANCE_ID,
   SYSTEM_VARIABLE_ID,
-  WsComponentMeta,
+  type WsComponentMeta,
 } from "@webstudio-is/sdk";
 import {
   $,
@@ -26,45 +26,54 @@ import {
   generateWebstudioComponent,
 } from "./component-generator";
 
-const isValidJSX = (code: string): boolean => {
-  // Create a "virtual" TypeScript program
-  const compilerHost = ts.createCompilerHost({});
-  const fileName = "virtual.tsx";
-
-  compilerHost.getSourceFile = (filename) => {
-    if (filename === fileName) {
-      return ts.createSourceFile(
-        filename,
-        code,
-        ts.ScriptTarget.Latest,
-        true,
-        ts.ScriptKind.TSX
-      );
-    }
-    return undefined;
-  };
-
-  const program = ts.createProgram(
-    [fileName],
-    {
-      jsx: ts.JsxEmit.React,
-      strict: true,
+const virtualRoot = "/component-generator-test";
+const virtualConfig = `${virtualRoot}/tsconfig.json`;
+const virtualFile = `${virtualRoot}/virtual.tsx`;
+let virtualCode = "";
+const typeScriptApi = new API({
+  cwd: virtualRoot,
+  fs: {
+    readFile(fileName) {
+      if (fileName === virtualConfig) {
+        return JSON.stringify({
+          compilerOptions: { jsx: "preserve", strict: true },
+          files: [virtualFile],
+        });
+      }
+      if (fileName === virtualFile) {
+        return virtualCode;
+      }
     },
-    compilerHost
-  );
+    fileExists(fileName) {
+      return fileName === virtualConfig || fileName === virtualFile;
+    },
+    directoryExists(directoryName) {
+      return directoryName === virtualRoot;
+    },
+  },
+});
+let typeScriptSnapshot: Snapshot;
 
-  const sourceFile = program.getSourceFile(fileName);
+beforeAll(() => {
+  typeScriptSnapshot = typeScriptApi.updateSnapshot({
+    openProjects: [virtualConfig],
+  });
+});
 
-  if (!sourceFile) {
-    return false;
-  }
+afterAll(() => {
+  typeScriptSnapshot.dispose();
+  typeScriptApi.close();
+});
 
-  const diagnostics = [
-    ...program.getSyntacticDiagnostics(sourceFile),
-    // ...program.getSemanticDiagnostics(sourceFile),
-  ];
-
-  return diagnostics.length === 0;
+const isValidJSX = (code: string): boolean => {
+  virtualCode = code;
+  const previousSnapshot = typeScriptSnapshot;
+  typeScriptSnapshot = typeScriptApi.updateSnapshot({
+    fileChanges: { changed: [virtualFile] },
+  });
+  previousSnapshot.dispose();
+  const project = typeScriptSnapshot.getProject(virtualConfig);
+  return project?.program.getSyntacticDiagnostics(virtualFile).length === 0;
 };
 
 const validateJSX = (code: string) => {
@@ -381,7 +390,54 @@ test("generate jsx children with expression", () => {
   ).toEqual(
     validateJSX(
       clear(`
-      {'Hello ' + myvar}
+      {renderText('Hello ' + myvar)}
+    `)
+    )
+  );
+});
+
+test("preserves siblings before expression children", () => {
+  expect(
+    generateJsxChildren({
+      scope: createScope(),
+      metas: new Map(),
+      children: [
+        { type: "id", value: "strong" },
+        { type: "expression", value: "$ws$dataSource$var" },
+      ],
+      instances: new Map([
+        [
+          "strong",
+          {
+            type: "instance",
+            id: "strong",
+            component: "Text",
+            tag: "strong",
+            children: [{ type: "text", value: "Important: " }],
+          },
+        ],
+      ]),
+      props: new Map(),
+      dataSources: toMap([
+        {
+          id: "var",
+          scopeInstanceId: "body",
+          name: "message",
+          type: "variable",
+          value: { type: "string", value: "Details" },
+        },
+      ]),
+      usedDataSources: new Map(),
+      indexesWithinAncestors: new Map(),
+    })
+  ).toEqual(
+    validateJSX(
+      clear(`
+      <Text
+      data-ws-tag="strong">
+      {"Important: "}
+      </Text>
+      {renderText(message)}
     `)
     )
   );
@@ -462,13 +518,67 @@ test("generate collection component as map", () => {
   ).toEqual(
     validateJSX(
       clear(`
-    {data?.map?.((element: any, index: number) =>
+    {Object.entries(
+      // @ts-ignore
+      data ?? {}
+    ).map(([_key, element]: any) => {
+      const index = Array.isArray(data) ? Number(_key) : _key;
+      return (
     <Fragment key={index}>
     <Label />
     <Button
     aria-label={element} />
     </Fragment>
-    )}
+    )
+    })
+    }
+    `)
+    )
+  );
+});
+
+test("generate collection component with itemKey", () => {
+  const data = new Variable("data", { a: "apple", b: "orange" });
+  const element = new Parameter("element");
+  const key = new Parameter("key");
+  expect(
+    generateJsxChildren({
+      scope: createScope(),
+      metas: new Map(),
+      children: [{ type: "id", value: "list" }],
+      usedDataSources: new Map(),
+      indexesWithinAncestors: new Map(),
+      ...renderData(
+        <ws.collection
+          ws:id="list"
+          data={expression`${data}`}
+          item={element}
+          itemKey={key}
+        >
+          <$.Label>{expression`${key}`}</$.Label>
+          <$.Button aria-label={expression`${element}`}></$.Button>
+        </ws.collection>
+      ),
+    })
+  ).toEqual(
+    validateJSX(
+      clear(`
+    {Object.entries(
+      // @ts-ignore
+      data ?? {}
+    ).map(([_key, element]: any) => {
+      const key = Array.isArray(data) ? Number(_key) : _key;
+      return (
+    <Fragment key={key}>
+    <Label>
+    {renderText(key)}
+    </Label>
+    <Button
+    aria-label={element} />
+    </Fragment>
+    )
+    })
+    }
     `)
     )
   );
@@ -640,10 +750,17 @@ test("avoid generating collection parameter variable as state", () => {
     const Page = () => {
     let [data, set$data] = useVariableState<any>(["apple","orange","mango"])
     return <Body>
-    {data?.map?.((element: any, index: number) =>
+    {Object.entries(
+      // @ts-ignore
+      data ?? {}
+    ).map(([_key, element]: any) => {
+      const index = Array.isArray(data) ? Number(_key) : _key;
+      return (
     <Fragment key={index}>
     </Fragment>
-    )}
+    )
+    })
+    }
     </Body>
     }
     `)
@@ -839,21 +956,28 @@ test("generate conditional collection", () => {
       ),
     })
   ).toMatchInlineSnapshot(`
-"const Page = () => {
-let [condition, set$condition] = useVariableState<any>(false)
-return <Body>
-{(condition) &&
-<>
-{[]?.map?.((collectionItem: any, index: number) =>
-<Fragment key={index}>
-</Fragment>
-)}
-</>
-}
-</Body>
-}
-"
-`);
+    "const Page = () => {
+    let [condition, set$condition] = useVariableState<any>(false)
+    return <Body>
+    {(condition) &&
+    <>
+    {Object.entries(
+      // @ts-ignore
+      []
+    ).map(([_key, collectionItem]: any) => {
+      const index = Array.isArray([]) ? Number(_key) : _key;
+      return (
+    <Fragment key={index}>
+    </Fragment>
+    )
+    })
+    }
+    </>
+    }
+    </Body>
+    }
+    "
+  `);
 });
 
 test("generate conditional body", () => {
@@ -881,10 +1005,10 @@ return (condition) &&
 `);
 });
 
-test("generate resource prop", () => {
+test("generate resource prop with configured form method", () => {
   const myResource = new ResourceValue("myResource", {
     url: expression`"https://my-url.com?with-secret"`,
-    method: "get",
+    method: "post",
     searchParams: [],
     headers: [],
   });
@@ -901,11 +1025,26 @@ test("generate resource prop", () => {
       name: "Page",
       rootInstanceId: "body",
       parameters: [],
-      metas: new Map(),
+      metas: new Map([
+        [
+          "Form",
+          {
+            props: {
+              action: {
+                control: "resource",
+                type: "resource",
+                required: false,
+                generatedProps: ["method"],
+              },
+            },
+          },
+        ],
+      ]),
       ...renderData(
         <$.Body ws:id="body">
           <$.Form ws:id="form1" action={myResource}></$.Form>
           <$.Form ws:id="form2" action={anotherResource}></$.Form>
+          <$.Form ws:id="form3" action={myResource} method="get"></$.Form>
         </$.Body>
       ),
     })
@@ -913,9 +1052,14 @@ test("generate resource prop", () => {
     "const Page = () => {
     return <Body>
     <Form
-    action={"action"} />
+    action={"action"}
+    method={"post"} />
     <Form
-    action={"action_1"} />
+    action={"action_1"}
+    method={"get"} />
+    <Form
+    action={"action"}
+    method={"get"} />
     </Body>
     }
     "
@@ -1080,13 +1224,13 @@ test("generate unset variables as undefined", () => {
   ).toEqual(
     validateJSX(
       clear(`
-      const Page = () => {
-      return <Body>
-      <Box>
-      {undefined + undefined}
-      </Box>
-      </Body>
-      }
+    const Page = () => {
+    return <Body>
+    <Box>
+    {renderText(undefined + undefined)}
+    </Box>
+    </Body>
+    }
     `)
     )
   );
@@ -1119,7 +1263,7 @@ test("generate global variables", () => {
       let [rootVariable, set$rootVariable] = useVariableState<any>("root")
       return <Body>
       <Box>
-      {rootVariable}
+      {renderText(rootVariable)}
       </Box>
       </Body>
       }
@@ -1376,6 +1520,52 @@ test("render ws:element component with ws:tag", () => {
        <span
        id={"span"} />
        </p>
+       </Body>
+       }
+     `)
+    )
+  );
+});
+
+test("render ws:element component with empty tag as div", () => {
+  expect(
+    generateWebstudioComponent({
+      classesMap: new Map(),
+      scope: createScope(),
+      name: "Page",
+      rootInstanceId: "bodyId",
+      parameters: [],
+      metas: new Map(),
+      props: new Map(),
+      dataSources: new Map(),
+      instances: new Map([
+        [
+          "bodyId",
+          {
+            type: "instance",
+            id: "bodyId",
+            component: "Body",
+            children: [{ type: "id", value: "elementId" }],
+          },
+        ],
+        [
+          "elementId",
+          {
+            type: "instance",
+            id: "elementId",
+            component: elementComponent,
+            tag: "",
+            children: [],
+          },
+        ],
+      ]),
+    })
+  ).toEqual(
+    validateJSX(
+      clear(`
+       const Page = () => {
+       return <Body>
+       <div />
        </Body>
        }
      `)

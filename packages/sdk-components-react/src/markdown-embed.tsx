@@ -1,6 +1,6 @@
-import { micromark } from "micromark";
-import { gfmTable, gfmTableHtml } from "micromark-extension-gfm-table";
-import { forwardRef, useMemo, type ComponentProps } from "react";
+import { forwardRef, useContext, useMemo, type ComponentProps } from "react";
+import { ReactSdkContext } from "@webstudio-is/react-sdk/runtime";
+import { renderMarkdownHtml } from "./markdown";
 
 type MarkdownEmbedProps = ComponentProps<"div"> & {
   code: string;
@@ -13,15 +13,11 @@ export const MarkdownEmbed = /* @__PURE__ */ forwardRef<
   MarkdownEmbedProps
 >((props, ref) => {
   const { code, children, ...rest } = props;
+  const { imageLoader, renderer } = useContext(ReactSdkContext);
   const html = useMemo(
     // support data uri protocol in images
-    () =>
-      micromark(code ?? "", {
-        allowDangerousProtocol: true,
-        extensions: [gfmTable()],
-        htmlExtensions: [gfmTableHtml()],
-      }),
-    [code]
+    () => renderMarkdownHtml(code ?? "", { imageLoader, renderer }),
+    [code, imageLoader, renderer]
   );
   return <div {...rest} ref={ref} dangerouslySetInnerHTML={{ __html: html }} />;
 });

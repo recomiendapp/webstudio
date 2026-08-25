@@ -87,7 +87,7 @@ export type LogoutPageProps = {
   logoutUrls: string[];
 };
 
-const LogoutResponse = z.object({
+const logoutResponse = z.object({
   redirectTo: z.string(),
 });
 
@@ -110,7 +110,7 @@ export const LogoutPage = (props: LogoutPageProps) => {
     }
 
     const data = await response.json();
-    const parsedData = LogoutResponse.safeParse(data);
+    const parsedData = logoutResponse.safeParse(data);
 
     if (false === parsedData.success) {
       throw {
@@ -152,7 +152,9 @@ export const LogoutPage = (props: LogoutPageProps) => {
   });
 
   return (
+    // oxlint-disable-next-line react-hooks/rules-of-hooks -- our useEffectEvent is a stable callback
     <form ref={refForm} action={handleLogout}>
+      {/* oxlint-disable-next-line react-hooks/rules-of-hooks -- our useEffectEvent is a stable callback */}
       <Logout logoutUrls={props.logoutUrls} onFinish={handleFinish} />
     </form>
   );

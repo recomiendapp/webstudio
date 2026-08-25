@@ -13,16 +13,17 @@ import {
   useSelectedAction,
   useCommandState,
 } from "@webstudio-is/design-system";
-import type { Instance } from "@webstudio-is/sdk";
+import { getPageById, type Instance } from "@webstudio-is/sdk";
 import { $instances, $pages } from "~/shared/sync/data-stores";
 import { getInstanceLabel } from "~/builder/shared/instance-label";
-import { buildInstancePath } from "~/shared/instance-utils";
+import { buildInstancePath } from "~/shared/instance-utils/lookup";
 import { $commandContent } from "~/builder/features/command-panel/command-state";
-import { findAwarenessByInstanceId } from "~/shared/awareness";
-import { $awareness } from "~/shared/awareness";
+import { findPageAndSelectorByInstanceId } from "@webstudio-is/project-build/runtime";
 import { $activeInspectorPanel } from "~/builder/shared/nano-states";
+import { $selectedPageId, selectInstance } from "~/shared/nano-states";
 import { useAutoSelectFirstItem } from "./auto-select";
 import { InstancePathFooter } from "./instance-path-footer";
+import { getPageDisplayName } from "~/builder/features/pages/page-utils";
 
 export type InstanceOption = {
   label: string;
@@ -53,13 +54,17 @@ export const InstanceList = ({
       continue;
     }
     const path = buildInstancePath(instanceId, pages, instances);
-    const awareness = findAwarenessByInstanceId(pages, instances, instanceId);
-    const page = pages.pages.find((p) => p.id === awareness.pageId);
+    const awareness = findPageAndSelectorByInstanceId(
+      pages,
+      instances,
+      instanceId
+    );
+    const page = getPageById(pages, awareness.pageId);
     usedInInstances.push({
       label: getInstanceLabel(instance),
       id: instance.id,
       path,
-      pageName: page?.name ?? "",
+      pageName: page === undefined ? "" : getPageDisplayName(page),
     });
   }
   const [search, setSearch] = useState("");
@@ -154,8 +159,13 @@ export const showInstance = (
   if (pagesData === undefined) {
     return;
   }
-  const awareness = findAwarenessByInstanceId(pagesData, instances, instanceId);
-  $awareness.set(awareness);
+  const { pageId, instanceSelector } = findPageAndSelectorByInstanceId(
+    pagesData,
+    instances,
+    instanceId
+  );
+  $selectedPageId.set(pageId);
+  selectInstance(instanceSelector);
   if (panel !== undefined) {
     $activeInspectorPanel.set(panel);
   }

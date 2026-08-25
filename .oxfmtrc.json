@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "trailingComma": "es5",
+  "printWidth": 80,
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    "pnpm-lock.yaml",
+    "packages/prisma-client/prisma/migrations/*/client",
+    "packages/prisma-client/**/*.d.ts",
+    "**/*.yml",
+    "**/*.yaml",
+    "**/*.toml",
+    "**/*.jsonc",
+    "docs/**",
+    "packages/cli/templates/**",
+    "fixtures/**/__generated__/**"
+  ]
+}

@@ -1,16 +1,11 @@
-import { atom, computed, type ReadableAtom } from "nanostores";
-import { useStore } from "@nanostores/react";
-import { useDebouncedCallback } from "use-debounce";
+import { computed } from "nanostores";
 import {
   type ComponentPropsWithoutRef,
   type ReactNode,
   useRef,
   useState,
-  useEffect,
-  useMemo,
   type ComponentProps,
 } from "react";
-import equal from "fast-deep-equal";
 import {
   ariaAttributes,
   attributesByTag,
@@ -21,12 +16,13 @@ import {
   showAttribute,
   standardAttributesToReactProps,
 } from "@webstudio-is/react-sdk";
+import { showAttributeMeta } from "@webstudio-is/project-build/runtime";
 import {
-  decodeDataSourceVariable,
   encodeDataSourceVariable,
   SYSTEM_VARIABLE_ID,
   systemParameter,
 } from "@webstudio-is/sdk";
+import { getContentModePropNamesByTag } from "@webstudio-is/project-build/runtime";
 import type { PropMeta, Prop, Asset } from "@webstudio-is/sdk";
 import { InfoCircleIcon } from "@webstudio-is/icons";
 import {
@@ -41,29 +37,16 @@ import {
   rawTheme,
 } from "@webstudio-is/design-system";
 import {
-  $dataSourceVariables,
-  $dataSources,
   $registeredComponentMetas,
   $variableValuesByInstanceSelector,
 } from "~/shared/nano-states";
-import type { BindingVariant } from "~/builder/shared/binding-popover";
+import { $dataSources } from "~/shared/sync/data-stores";
 import { humanizeString } from "~/shared/string-utils";
 import {
   $selectedInstance,
   $selectedInstanceKeyWithRoot,
-} from "~/shared/awareness";
+} from "~/shared/nano-states";
 import { $instanceTags } from "../style-panel/shared/model";
-
-export const showAttributeMeta: PropMeta = {
-  label: "Show",
-  required: false,
-  control: "boolean",
-  type: "boolean",
-  defaultValue: true,
-  // If you are changing it, change the other one too
-  description:
-    "Removes the instance from the DOM. Breakpoints have no effect on this setting.",
-};
 
 export type PropValue =
   | { type: "number"; value: number }
@@ -93,6 +76,7 @@ export type ControlProps<Control> = {
   prop: Prop | undefined;
   propName: string;
   computedValue: unknown;
+  computedProps?: ReadonlyMap<string, unknown>;
   onChange: (value: PropValue) => void;
 };
 
@@ -177,79 +161,6 @@ export const Label = ({
   );
 };
 
-export const useLocalValue = <Type,>(
-  savedValue: Type,
-  onSave: (value: Type) => void,
-  { autoSave = true } = {}
-) => {
-  const isEditingRef = useRef(false);
-  const localValueRef = useRef(savedValue);
-
-  const [_, setRefresh] = useState(0);
-
-  const onSaveRef = useRef(onSave);
-  onSaveRef.current = onSave;
-
-  const save = () => {
-    isEditingRef.current = false;
-    if (equal(localValueRef.current, savedValue) === false) {
-      // To synchronize with setState immediately followed by save
-      onSaveRef.current(localValueRef.current);
-    }
-  };
-
-  const saveDebounced = useDebouncedCallback(save, 500);
-
-  const setLocalValue = (value: Type) => {
-    isEditingRef.current = true;
-    localValueRef.current = value;
-    setRefresh((refresh) => refresh + 1);
-    if (autoSave) {
-      saveDebounced();
-    }
-  };
-
-  // onBlur will not trigger if control is unmounted when props panel is closed or similar.
-  // So we're saving at the unmount
-  // store save in ref to access latest saved value from render
-  // instead of stale one
-  const saveRef = useRef(save);
-  saveRef.current = save;
-  useEffect(() => {
-    // access ref in the moment of unmount
-    return () => saveRef.current();
-  }, []);
-
-  useEffect(() => {
-    // Update local value if saved value changes and control is not in edit mode.
-    if (
-      isEditingRef.current === false &&
-      localValueRef.current !== savedValue
-    ) {
-      localValueRef.current = savedValue;
-      setRefresh((refresh) => refresh + 1);
-    }
-  }, [savedValue]);
-
-  return {
-    /**
-     * Contains:
-     *  - either the latest `savedValue`
-     *  - or the latest value set via `set()`
-     * (whichever changed most recently)
-     */
-    value: localValueRef.current,
-    /**
-     * Should be called on onChange or similar event
-     */
-    set: setLocalValue,
-    /**
-     * Should be called on onBlur or similar event
-     */
-    save,
-  };
-};
-
 type LayoutProps = {
   label: ReturnType<typeof Label>;
   children: ReactNode;
@@ -328,6 +239,26 @@ export const Row = ({
   </Flex>
 );
 
+export const CenteredPanelMessage = ({
+  children,
+  color = "subtle",
+}: {
+  children: ReactNode;
+  color?: ComponentProps<typeof Text>["color"];
+}) => (
+  <Row
+    css={{
+      alignItems: "center",
+      justifyContent: "center",
+      flexGrow: 1,
+      minHeight: 100,
+      textAlign: "center",
+    }}
+  >
+    <Text color={color}>{children}</Text>
+  </Row>
+);
+
 export const $selectedInstanceScope = computed(
   [
     $selectedInstanceKeyWithRoot,
@@ -358,61 +289,6 @@ export const $selectedInstanceScope = computed(
     return { scope, aliases };
   }
 );
-
-export const updateExpressionValue = (expression: string, value: unknown) => {
-  const dataSources = $dataSources.get();
-  // when expression contains only reference to variable update that variable
-  // extract id without parsing expression
-  const potentialVariableId = decodeDataSourceVariable(expression);
-  if (
-    potentialVariableId !== undefined &&
-    dataSources.has(potentialVariableId)
-  ) {
-    const dataSourceId = potentialVariableId;
-    const dataSourceVariables = new Map($dataSourceVariables.get());
-    dataSourceVariables.set(dataSourceId, value);
-    $dataSourceVariables.set(dataSourceVariables);
-  }
-};
-
-type BindingState = {
-  overwritable: boolean;
-  variant: BindingVariant;
-};
-
-export const useBindingState = (expression: undefined | string) => {
-  const $bindingState = useMemo((): ReadableAtom<BindingState> => {
-    if (expression === undefined) {
-      // value is not bound to expression and can be updated
-      return atom({ overwritable: true, variant: "default" });
-    }
-    // try to extract variable id from expression
-    const potentialVariableId = decodeDataSourceVariable(expression);
-    if (potentialVariableId === undefined) {
-      // expression is complex and cannot be updated
-      return atom({ overwritable: false, variant: "bound" });
-    }
-    return computed(
-      [$dataSources, $dataSourceVariables],
-      (dataSources, dataSourceVariables): BindingState => {
-        const dataSource = dataSources.get(potentialVariableId);
-        // resources and parameters cannot be updated
-        if (dataSource?.type !== "variable") {
-          return { overwritable: false, variant: "bound" };
-        }
-        const variableId = potentialVariableId;
-        return {
-          overwritable: true,
-          variant:
-            dataSourceVariables.get(variableId) === undefined
-              ? "bound"
-              : "overwritten",
-        };
-      }
-    );
-  }, [expression]);
-  return useStore($bindingState);
-};
 
 export const humanizeAttribute = (string: string) => {
   if (string.includes("-")) {
@@ -458,31 +334,55 @@ const attributeToMeta = (attribute: Attribute): PropMeta => {
   throw Error("impossible case");
 };
 
+const $contentModePropNamesByTag = computed(
+  [$registeredComponentMetas],
+  getContentModePropNamesByTag
+);
+
 export const $selectedInstancePropsMetas = computed(
-  [$selectedInstance, $registeredComponentMetas, $instanceTags],
-  (instance, metas, instanceTags): Map<string, PropMeta> => {
+  [
+    $selectedInstance,
+    $registeredComponentMetas,
+    $instanceTags,
+    $contentModePropNamesByTag,
+  ],
+  (
+    instance,
+    metas,
+    instanceTags,
+    contentModePropNamesByTag
+  ): Map<string, PropMeta> => {
     if (instance === undefined) {
       return new Map();
     }
     const meta = metas.get(instance.component);
     const tag = instanceTags.get(instance.id);
     const propsMetas = new Map<Prop["name"], PropMeta>();
+    const contentModePropNames =
+      tag === undefined ? undefined : contentModePropNamesByTag.get(tag);
+    const toAttributeMeta = (attribute: Attribute): PropMeta => {
+      const propMeta = attributeToMeta(attribute);
+      if (contentModePropNames?.has(attribute.name)) {
+        return { ...propMeta, contentMode: true };
+      }
+      return propMeta;
+    };
     // add html attributes only when instance has tag
     if (tag) {
       if (elementsByTag[tag].categories.includes("html-element")) {
         for (const attribute of [...ariaAttributes].reverse()) {
-          propsMetas.set(attribute.name, attributeToMeta(attribute));
+          propsMetas.set(attribute.name, toAttributeMeta(attribute));
         }
         // include global attributes only for html elements
         if (attributesByTag["*"]) {
           for (const attribute of [...attributesByTag["*"]].reverse()) {
-            propsMetas.set(attribute.name, attributeToMeta(attribute));
+            propsMetas.set(attribute.name, toAttributeMeta(attribute));
           }
         }
       }
       if (attributesByTag[tag]) {
         for (const attribute of [...attributesByTag[tag]].reverse()) {
-          propsMetas.set(attribute.name, attributeToMeta(attribute));
+          propsMetas.set(attribute.name, toAttributeMeta(attribute));
         }
       }
     }

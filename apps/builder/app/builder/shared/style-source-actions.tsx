@@ -3,6 +3,7 @@ import { atom, computed } from "nanostores";
 import { useStore } from "@nanostores/react";
 import {
   Dialog,
+  DialogActions,
   DialogContent,
   DialogTitle,
   DialogClose,
@@ -13,27 +14,23 @@ import {
   InputField,
   toast,
 } from "@webstudio-is/design-system";
-import type { Instance, StyleSource } from "@webstudio-is/sdk";
+import type { StyleSource } from "@webstudio-is/sdk";
+import type { RenameStyleSourceError } from "@webstudio-is/project-build/runtime";
 import {
-  $styleSources,
-  $styleSourceSelections,
-  $styles,
   $selectedStyleSources,
   $selectedStyleState,
 } from "~/shared/nano-states";
 import {
-  deleteStyleSourceMutable,
+  $styleSourceSelections,
+  $styleSources,
+} from "~/shared/sync/data-stores";
+import {
   findUnusedTokens,
-  deleteStyleSourcesMutable,
-  validateAndRenameStyleSource,
-  renameStyleSourceMutable,
-  type RenameStyleSourceError,
-} from "~/shared/style-source-utils";
-import { serverSyncStore } from "~/shared/sync/sync-stores";
-import { $selectedInstance } from "~/shared/awareness";
-
-// Re-export the type for convenience
-export type { RenameStyleSourceError };
+  getStyleSourceUsages,
+  validateStyleSourceName,
+} from "@webstudio-is/project-build/runtime";
+import { $selectedInstance } from "~/shared/nano-states";
+import { executeRuntimeMutation } from "~/shared/instance-utils/data";
 
 const $isDeleteUnusedTokensDialogOpen = atom(false);
 
@@ -43,23 +40,13 @@ export const openDeleteUnusedTokensDialog = () => {
 
 export const $styleSourceUsages = computed(
   $styleSourceSelections,
-  (styleSourceSelections) => {
-    const styleSourceUsages = new Map<StyleSource["id"], Set<Instance["id"]>>();
-    for (const { instanceId, values } of styleSourceSelections.values()) {
-      for (const styleSourceId of values) {
-        let usages = styleSourceUsages.get(styleSourceId);
-        if (usages === undefined) {
-          usages = new Set();
-          styleSourceUsages.set(styleSourceId, usages);
-        }
-        usages.add(instanceId);
-      }
-    }
-    return styleSourceUsages;
-  }
+  (styleSourceSelections) =>
+    getStyleSourceUsages(styleSourceSelections.values())
 );
 
-const deselectMatchingStyleSource = (styleSourceId: StyleSource["id"]) => {
+export const deselectMatchingStyleSource = (
+  styleSourceId: StyleSource["id"]
+) => {
   const instanceId = $selectedInstance.get()?.id;
   if (instanceId === undefined) {
     return;
@@ -73,17 +60,10 @@ const deselectMatchingStyleSource = (styleSourceId: StyleSource["id"]) => {
 };
 
 export const deleteStyleSource = (styleSourceId: StyleSource["id"]) => {
-  serverSyncStore.createTransaction(
-    [$styleSources, $styleSourceSelections, $styles],
-    (styleSources, styleSourceSelections, styles) => {
-      deleteStyleSourceMutable({
-        styleSourceId,
-        styleSources,
-        styleSourceSelections,
-        styles,
-      });
-    }
-  );
+  executeRuntimeMutation({
+    id: "styleSources.delete",
+    input: { styleSourceIds: [styleSourceId] },
+  });
   // reset selected style source if necessary
   deselectMatchingStyleSource(styleSourceId);
 };
@@ -97,17 +77,10 @@ export const deleteUnusedTokens = () => {
     return 0;
   }
 
-  serverSyncStore.createTransaction(
-    [$styleSources, $styleSourceSelections, $styles],
-    (styleSources, styleSourceSelections, styles) => {
-      deleteStyleSourcesMutable({
-        styleSourceIds: unusedTokenIds,
-        styleSources,
-        styleSourceSelections,
-        styles,
-      });
-    }
-  );
+  executeRuntimeMutation({
+    id: "styleSources.delete",
+    input: { styleSourceIds: unusedTokenIds },
+  });
 
   return unusedTokenIds.length;
 };
@@ -117,7 +90,7 @@ export const renameStyleSource = (
   name: string
 ): RenameStyleSourceError | undefined => {
   const styleSources = $styleSources.get();
-  const validationError = validateAndRenameStyleSource({
+  const validationError = validateStyleSourceName({
     id,
     name,
     styleSources,
@@ -125,8 +98,25 @@ export const renameStyleSource = (
   if (validationError) {
     return validationError;
   }
-  serverSyncStore.createTransaction([$styleSources], (styleSources) => {
-    renameStyleSourceMutable({ id, name, styleSources });
+  executeRuntimeMutation({
+    id: "styleSources.rename",
+    input: {
+      styleSourceId: id,
+      name,
+    },
+  });
+};
+
+export const setStyleSourceLocked = (
+  id: StyleSource["id"],
+  locked: boolean
+) => {
+  executeRuntimeMutation({
+    id: "styleSources.setLock",
+    input: {
+      styleSourceId: id,
+      locked,
+    },
   });
 };
 
@@ -159,21 +149,22 @@ export const DeleteStyleSourceDialog = ({
         <DialogTitle>Delete confirmation</DialogTitle>
         <Flex gap="3" direction="column" css={{ padding: theme.panel.padding }}>
           <Text>{`Delete "${styleSource?.name}" token from the project including all of its styles?`}</Text>
-          <Flex direction="rowReverse" gap="2">
-            <Button
-              color="destructive"
-              onClick={() => {
-                onConfirm(styleSource!.id);
-                onClose();
-              }}
-            >
-              Delete
-            </Button>
-            <DialogClose>
-              <Button color="ghost">Cancel</Button>
-            </DialogClose>
-          </Flex>
         </Flex>
+        <DialogActions>
+          <Button
+            autoFocus
+            color="destructive"
+            onClick={() => {
+              onConfirm(styleSource!.id);
+              onClose();
+            }}
+          >
+            Delete
+          </Button>
+          <DialogClose>
+            <Button color="ghost">Cancel</Button>
+          </DialogClose>
+        </DialogActions>
       </DialogContent>
     </Dialog>
   );
@@ -233,7 +224,7 @@ export const RenameStyleSourceDialog = ({
           }
         }}
       >
-        <DialogTitle>Rename Token</DialogTitle>
+        <DialogTitle>Rename token</DialogTitle>
         <Flex gap="3" direction="column" css={{ padding: theme.panel.padding }}>
           <Flex direction="column" gap="1">
             <InputField
@@ -250,15 +241,15 @@ export const RenameStyleSourceDialog = ({
               </Text>
             )}
           </Flex>
-          <Flex direction="rowReverse" gap="2">
-            <Button color="primary" onClick={handleConfirm}>
-              Rename
-            </Button>
-            <DialogClose>
-              <Button color="ghost">Cancel</Button>
-            </DialogClose>
-          </Flex>
         </Flex>
+        <DialogActions>
+          <Button color="primary" onClick={handleConfirm}>
+            Rename
+          </Button>
+          <DialogClose>
+            <Button color="ghost">Cancel</Button>
+          </DialogClose>
+        </DialogActions>
       </DialogContent>
     </Dialog>
   );
@@ -322,32 +313,33 @@ export const DeleteUnusedTokensDialog = () => {
               </Text>
             </>
           )}
-          <Flex direction="rowReverse" gap="2">
-            {unusedTokens.length > 0 && (
-              <Button
-                color="destructive"
-                onClick={() => {
-                  const deletedCount = deleteUnusedTokens();
-                  handleClose();
-                  if (deletedCount === 0) {
-                    toast.info("No unused tokens to delete");
-                  } else {
-                    toast.success(
-                      `Deleted ${deletedCount} unused ${deletedCount === 1 ? "token" : "tokens"}`
-                    );
-                  }
-                }}
-              >
-                Delete
-              </Button>
-            )}
-            <DialogClose>
-              <Button color="ghost">
-                {unusedTokens.length > 0 ? "Cancel" : "Close"}
-              </Button>
-            </DialogClose>
-          </Flex>
         </Flex>
+        <DialogActions>
+          {unusedTokens.length > 0 && (
+            <Button
+              color="destructive"
+              autoFocus
+              onClick={() => {
+                const deletedCount = deleteUnusedTokens();
+                handleClose();
+                if (deletedCount === 0) {
+                  toast.info("No unused tokens to delete");
+                } else {
+                  toast.success(
+                    `Deleted ${deletedCount} unused ${deletedCount === 1 ? "token" : "tokens"}`
+                  );
+                }
+              }}
+            >
+              Delete
+            </Button>
+          )}
+          <DialogClose>
+            <Button color="ghost">
+              {unusedTokens.length > 0 ? "Cancel" : "Close"}
+            </Button>
+          </DialogClose>
+        </DialogActions>
       </DialogContent>
     </Dialog>
   );

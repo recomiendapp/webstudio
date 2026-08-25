@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { computed } from "nanostores";
+import { ROOT_INSTANCE_ID } from "@webstudio-is/sdk";
 import {
   CommandGroup,
   CommandGroupHeading,
@@ -9,7 +10,13 @@ import {
   useSelectedAction,
   useResetActionIndex,
 } from "@webstudio-is/design-system";
-import { $dataSources } from "~/shared/sync/data-stores";
+import {
+  $dataSources,
+  $instances,
+  $pages,
+  $props,
+  $resources,
+} from "~/shared/sync/data-stores";
 import {
   $commandContent,
   $isCommandPanelOpen,
@@ -17,16 +24,15 @@ import {
   focusCommandPanel,
 } from "../command-state";
 import { InstanceList, showInstance } from "../shared/instance-list";
-import { deleteVariableMutable } from "~/shared/data-variables";
-import { updateWebstudioData } from "~/shared/instance-utils";
 import {
   DeleteDataVariableDialog,
   RenameDataVariableDialog,
-  $usedVariablesInInstances,
+  deleteDataVariable,
 } from "~/builder/shared/data-variable-utils";
 import type { BaseOption } from "../shared/types";
 import { formatUsageCount, getUsageSearchTerms } from "../shared/usage-utils";
 import { getInstanceLabel } from "~/builder/shared/instance-label";
+import { findVariableUsagesByInstance } from "@webstudio-is/project-build/runtime";
 
 export type DataVariableOption = BaseOption & {
   type: "dataVariable";
@@ -36,11 +42,28 @@ export type DataVariableOption = BaseOption & {
   usages: number;
 };
 
+const $usedVariablesInInstances = computed(
+  [$isCommandPanelOpen, $pages, $instances, $props, $dataSources, $resources],
+  (isCommandPanelOpen, pages, instances, props, dataSources, resources) => {
+    if (isCommandPanelOpen === false) {
+      return new Map();
+    }
+    return findVariableUsagesByInstance({
+      startingInstanceId: ROOT_INSTANCE_ID,
+      pages,
+      instances,
+      props,
+      dataSources,
+      resources,
+    });
+  }
+);
+
 export const $dataVariableOptions = computed(
   [$isCommandPanelOpen, $dataSources, $usedVariablesInInstances],
-  (isOpen, dataSources, usedInInstances) => {
+  (isCommandPanelOpen, dataSources, usedInInstances) => {
     const dataVariableOptions: DataVariableOption[] = [];
-    if (!isOpen) {
+    if (!isCommandPanelOpen) {
       return dataVariableOptions;
     }
 
@@ -177,9 +200,7 @@ export const DataVariablesGroup = ({
           focusCommandPanel();
         }}
         onConfirm={(variableId) => {
-          updateWebstudioData((data) => {
-            deleteVariableMutable(data, variableId);
-          });
+          deleteDataVariable(variableId);
           toast.success(`Variable "${variableDialog?.name}" deleted`);
           setVariableDialog(undefined);
         }}

@@ -1,5 +1,5 @@
 import type { AUTH_PROVIDERS } from "~/shared/session";
-import { publicStaticEnv } from "~/env/env.static";
+import { getAssetUploadApiUrl } from "@webstudio-is/sdk/runtime";
 import { getAuthorizationServerOrigin } from "./origins";
 import type { BuilderMode } from "../nano-states/misc";
 
@@ -14,52 +14,54 @@ const searchParams = (params: Record<string, string | undefined | null>) => {
   return asString === "" ? "" : `?${asString}`;
 };
 
+export type BuilderLinkParams = {
+  pageId?: string;
+  instanceSelector?: readonly string[];
+  authToken?: string;
+  pageHash?: string;
+  mode?: BuilderMode;
+  safemode?: boolean;
+};
+
 export const builderPath = ({
   pageId,
+  instanceSelector,
   authToken,
   pageHash,
   mode,
-}: {
-  pageId?: string;
-  authToken?: string;
-  pageHash?: string;
-  mode?: "preview" | "content";
-}) => {
+  safemode = false,
+}: BuilderLinkParams = {}) => {
   return `/${searchParams({
     pageId,
+    instance: instanceSelector?.join(","),
     authToken,
     pageHash,
     mode,
+    safemode: safemode ? "true" : undefined,
   })}`;
 };
 
-export const builderUrl = (props: {
+export const builderUrl = ({
+  projectId,
+  origin,
+  ...link
+}: BuilderLinkParams & {
   projectId: string;
-  pageId?: string;
   origin: string;
-  authToken?: string;
-  mode?: BuilderMode;
 }) => {
-  const authServerOrigin = getAuthorizationServerOrigin(props.origin);
+  const authServerOrigin = getAuthorizationServerOrigin(origin);
 
-  const url = new URL(
-    builderPath({ pageId: props.pageId, authToken: props.authToken }),
-    authServerOrigin
-  );
+  const url = new URL(builderPath(link), authServerOrigin);
 
   const fragments = url.host.split(".");
   if (fragments.length <= 3) {
-    fragments.splice(0, 0, "p-" + props.projectId);
+    fragments.splice(0, 0, "p-" + projectId);
   } else {
     // staging | development branches
-    fragments[0] = "p-" + props.projectId + "-dot-" + fragments[0];
+    fragments[0] = "p-" + projectId + "-dot-" + fragments[0];
   }
 
   url.host = fragments.join(".");
-
-  if (props.mode !== undefined) {
-    url.searchParams.set("mode", props.mode);
-  }
 
   return url.href;
 };
@@ -100,11 +102,14 @@ export const loginPath = (params: {
 export const logoutPath = () => "/logout";
 export const restLogoutPath = () => "/dashboard-logout";
 
-export const userPlanSubscriptionPath = () => {
+export const planSubscriptionPath = (subscriptionId?: string) => {
   const urlSearchParams = new URLSearchParams();
   urlSearchParams.set("return_url", window.location.href);
+  if (subscriptionId) {
+    urlSearchParams.set("subscription", subscriptionId);
+  }
 
-  return `/n8n/billing_portal/sessions?${urlSearchParams.toString()}`;
+  return `/builder-payments/billing-portal/sessions?${urlSearchParams.toString()}`;
 };
 
 export const authCallbackPath = ({
@@ -118,10 +123,6 @@ export const authPath = ({
 }: {
   provider: "google" | "github" | "dev";
 }) => `/auth/${provider}`;
-
-export const restAssetsPath = () => {
-  return `/rest/assets`;
-};
 
 export const restAssetsUploadPath = ({
   name,
@@ -140,30 +141,20 @@ export const restAssetsUploadPath = ({
     urlSearchParams.set("height", String(height));
   }
 
-  if (urlSearchParams.size > 0) {
-    return `/rest/assets/${name}?${urlSearchParams.toString()}`;
+  const query = urlSearchParams.toString();
+  if (query !== "") {
+    return `${getAssetUploadApiUrl(name)}?${query}`;
   }
 
-  return `/rest/assets/${name}`;
-};
-
-export const restPatchPath = () => {
-  const urlSearchParams = new URLSearchParams();
-
-  urlSearchParams.set("client-version", publicStaticEnv.VERSION);
-
-  const urlSearchParamsString = urlSearchParams.toString();
-
-  return `/rest/patch${
-    urlSearchParamsString ? `?${urlSearchParamsString}` : ""
-  }`;
+  return getAssetUploadApiUrl(name);
 };
 
 export const getCanvasUrl = () => {
   return `/canvas`;
 };
 
-export const restResourcesLoader = () => `/rest/resources-loader`;
+export const restResourcesLoader = ({ diagnostics = false } = {}) =>
+  `/rest/resources-loader${diagnostics ? "?diagnostics=true" : ""}`;
 
 export const marketplacePath = (method: string) =>
   `/builder/marketplace/${method}`;

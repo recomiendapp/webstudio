@@ -39,6 +39,7 @@ yarn-error.log*
 
 # data
 /data
+.webstudio
 *.db
 *.db-journal
 
@@ -50,6 +51,8 @@ yarn-error.log*
 packages/**/lib
 generated
 storybook-static
+.visual-regression
+.visual-regression-cache
 tsconfig.tsbuildinfo
 
 # to save thunder https://marketplace.visualstudio.com/items?itemName=rangav.vscode-thunder-client files
@@ -64,3 +67,6 @@ packages/prisma-client/src/__generated__
 
 .temp
 *.timestamp-*.mjs
+
+# copilot instructions
+.github/instructions

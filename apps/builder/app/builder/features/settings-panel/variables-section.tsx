@@ -3,6 +3,7 @@ import { computed } from "nanostores";
 import { useStore } from "@nanostores/react";
 import {
   Button,
+  Chip,
   css,
   CssValueListArrowFocus,
   CssValueListItem,
@@ -21,15 +22,14 @@ import {
 } from "@webstudio-is/design-system";
 import { EllipsesIcon, PlusIcon } from "@webstudio-is/icons";
 import type { DataSource } from "@webstudio-is/sdk";
-import { findPageByIdOrPath } from "@webstudio-is/sdk";
+import { $variableValuesByInstanceSelector } from "~/shared/nano-states";
+import { $dataSources } from "~/shared/sync/data-stores";
 import {
-  $dataSources,
   $instances,
   $pages,
   $props,
   $resources,
-  $variableValuesByInstanceSelector,
-} from "~/shared/nano-states";
+} from "~/shared/sync/data-stores";
 import {
   CollapsibleSectionRoot,
   useOpenState,
@@ -40,14 +40,15 @@ import {
   $selectedInstance,
   $selectedInstanceKeyWithRoot,
   $selectedPage,
-} from "~/shared/awareness";
-import { updateWebstudioData } from "~/shared/instance-utils";
+} from "~/shared/nano-states";
 import {
-  deleteVariableMutable,
   findAvailableVariables,
   findUsedVariables,
-} from "~/shared/data-variables";
-import { DeleteDataVariableDialog } from "~/builder/shared/data-variable-utils";
+} from "@webstudio-is/project-build/runtime";
+import {
+  DeleteDataVariableDialog,
+  deleteDataVariable,
+} from "~/builder/shared/data-variable-utils";
 
 /**
  * find variables defined specifically on this selected instance
@@ -96,23 +97,23 @@ const $usedVariables = computed(
   }
 );
 
-const EmptyVariables = () => {
-  return (
-    <Flex direction="column" gap="2">
-      <Flex justify="center" align="center">
-        <Text variant="labelsSentenceCase" align="center">
-          No data variables created
-          <br /> on this instance
-        </Text>
-      </Flex>
-      <Flex justify="center" align="center">
-        <VariablePopoverTrigger>
-          <Button prefix={<PlusIcon />}>Create data variable</Button>
-        </VariablePopoverTrigger>
-      </Flex>
+const EmptyVariables = () => (
+  <Flex direction="column" gap="2">
+    <Flex justify="center" align="center">
+      <Text variant="labels" align="center">
+        No data variables created
+        <br /> on this instance
+      </Text>
     </Flex>
-  );
-};
+    <Flex justify="center" align="center">
+      <VariablePopoverTrigger>
+        <Button type="button" prefix={<PlusIcon />}>
+          Create data variable
+        </Button>
+      </VariablePopoverTrigger>
+    </Flex>
+  </Flex>
+);
 
 const variableLabelStyle = css({
   whiteSpace: "nowrap",
@@ -120,6 +121,33 @@ const variableLabelStyle = css({
   textOverflow: "ellipsis",
   maxWidth: "100%",
 });
+
+const getVariableBadge = (variable: DataSource) => {
+  if (variable.type === "variable") {
+    return {
+      label: "Static variable",
+      text: "S",
+    };
+  }
+  if (variable.type === "resource") {
+    return {
+      label: "Dynamic data variable",
+      text: "D",
+    };
+  }
+};
+
+const DataVariableBadge = ({ variable }: { variable: DataSource }) => {
+  const badge = getVariableBadge(variable);
+  if (badge === undefined) {
+    return null;
+  }
+  return (
+    <Chip title={badge.label} aria-label={badge.label}>
+      {badge.text}
+    </Chip>
+  );
+};
 
 const VariablesItem = ({
   variable,
@@ -160,6 +188,7 @@ const VariablesItem = ({
           </Flex>
         }
         data-state={isMenuOpen ? "open" : undefined}
+        suffix={<DataVariableBadge variable={variable} />}
         buttons={
           <>
             {((source === "local" && variable.type !== "parameter") ||
@@ -199,14 +228,7 @@ const VariablesItem = ({
                     variable.id === selectedPage?.systemDataSourceId && (
                       <DropdownMenuItem
                         onSelect={() => {
-                          updateWebstudioData((data) => {
-                            const page = findPageByIdOrPath(
-                              selectedPage.id,
-                              data.pages
-                            );
-                            delete page?.systemDataSourceId;
-                            deleteVariableMutable(data, variable.id);
-                          });
+                          deleteDataVariable(variable.id);
                         }}
                       >
                         Delete
@@ -222,9 +244,7 @@ const VariablesItem = ({
                 setVariableToDelete(undefined);
               }}
               onConfirm={(variableId) => {
-                updateWebstudioData((data) => {
-                  deleteVariableMutable(data, variableId);
-                });
+                deleteDataVariable(variableId);
                 setVariableToDelete(undefined);
               }}
             />
@@ -264,7 +284,7 @@ const VariablesList = () => {
   );
 };
 
-const label = "Data Variables";
+const label = "Data variables";
 
 export const VariablesSection = () => {
   const [isOpen, setIsOpen] = useOpenState(label);
@@ -279,8 +299,13 @@ export const VariablesSection = () => {
           suffix={
             <VariablePopoverTrigger>
               <SectionTitleButton
+                type="button"
+                aria-label="Add data variable"
                 prefix={<PlusIcon />}
-                // open panel when add new varable
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                }}
+                // open panel when adding a new variable
                 onClick={() => {
                   if (isOpen === false) {
                     setIsOpen(true);
@@ -290,7 +315,7 @@ export const VariablesSection = () => {
             </VariablePopoverTrigger>
           }
         >
-          <SectionTitleLabel>Data Variables</SectionTitleLabel>
+          <SectionTitleLabel>Data variables</SectionTitleLabel>
         </SectionTitle>
       }
     >

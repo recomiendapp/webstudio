@@ -3,14 +3,24 @@ name: CI setup
 description: |
   Sets up the CI environment for the project.
 
+inputs:
+  run-scripts:
+    description: Run dependency lifecycle scripts during installation.
+    default: "false"
+
 runs:
   using: "composite"
 
   steps:
-    - uses: pnpm/action-setup@v4
-    - uses: actions/setup-node@v4
+    - uses: pnpm/action-setup@v6
+    - uses: actions/setup-node@v5
       with:
-        node-version: 20
+        node-version: 22
         cache: pnpm
-    - run: pnpm install --frozen-lockfile --ignore-scripts
+    - run: |
+        install_args=(--frozen-lockfile)
+        if [ "${{ inputs.run-scripts }}" != "true" ]; then
+          install_args+=(--ignore-scripts)
+        fi
+        pnpm install "${install_args[@]}"
       shell: bash

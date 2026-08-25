@@ -1,23 +1,18 @@
-import { useMemo, useEffect, useState, useLayoutEffect, useRef } from "react";
+import {
+  useMemo,
+  useEffect,
+  useState,
+  useLayoutEffect,
+  useRef,
+  type ReactNode,
+} from "react";
 import { ErrorBoundary, type FallbackProps } from "react-error-boundary";
 import { useStore } from "@nanostores/react";
-import { type Instances, coreMetas } from "@webstudio-is/sdk";
-import { coreTemplates } from "@webstudio-is/sdk/core-templates";
+import { type Instances } from "@webstudio-is/sdk";
 import type { Components } from "@webstudio-is/react-sdk";
 import { wsImageLoader, wsVideoLoader } from "@webstudio-is/image";
 import { ReactSdkContext } from "@webstudio-is/react-sdk/runtime";
-import * as baseComponents from "@webstudio-is/sdk-components-react";
-import * as baseComponentMetas from "@webstudio-is/sdk-components-react/metas";
-import { hooks as baseComponentHooks } from "@webstudio-is/sdk-components-react/hooks";
-import * as baseComponentTemplates from "@webstudio-is/sdk-components-react/templates";
-import * as animationComponents from "@webstudio-is/sdk-components-animation";
-import * as animationComponentMetas from "@webstudio-is/sdk-components-animation/metas";
-import * as animationTemplates from "@webstudio-is/sdk-components-animation/templates";
-import { hooks as animationComponentHooks } from "@webstudio-is/sdk-components-animation/hooks";
-import * as radixComponents from "@webstudio-is/sdk-components-react-radix";
-import * as radixComponentMetas from "@webstudio-is/sdk-components-react-radix/metas";
-import * as radixTemplates from "@webstudio-is/sdk-components-react-radix/templates";
-import { hooks as radixComponentHooks } from "@webstudio-is/sdk-components-react-radix/hooks";
+import { canvasComponentLibraries } from "@webstudio-is/sdk-components-registry/canvas";
 import { ErrorMessage } from "~/shared/error";
 import { $publisher, publish } from "~/shared/pubsub";
 import {
@@ -37,9 +32,6 @@ import {
   WebstudioComponentPreview,
 } from "./features/webstudio-component";
 import {
-  $assets,
-  $pages,
-  $instances,
   registerComponentLibrary,
   $registeredComponents,
   subscribeComponentHooks,
@@ -48,16 +40,17 @@ import {
   $isContentMode,
   subscribeModifierKeys,
   assetBaseUrl,
-  $breakpoints,
 } from "~/shared/nano-states";
+import { $assets } from "~/shared/sync/data-stores";
+import { $pages, $instances, $breakpoints } from "~/shared/sync/data-stores";
 import { useDragAndDrop } from "./shared/use-drag-drop";
 import {
   initCopyPaste,
   initCopyPasteForContentEditMode,
-} from "~/shared/copy-paste/init-copy-paste";
-import { setDataCollapsed, subscribeCollapsed } from "./collapsed";
+} from "~/shared/copy-paste/copy-paste";
+import { inflateInstance, subscribeInflator } from "./inflator";
 import { useWindowResizeDebounced } from "~/shared/dom-hooks";
-import { subscribeInstanceSelection } from "./instance-selection";
+import { subscribeInstanceSelection } from "./instance-selection-events";
 import { subscribeInstanceHovering } from "./instance-hovering";
 import { useHashLinkSync } from "~/shared/pages";
 import { useMount } from "~/shared/hook-utils/use-mount";
@@ -66,15 +59,17 @@ import { subscribeCommands } from "~/canvas/shared/commands";
 import { updateCollaborativeInstanceRect } from "./collaborative-instance";
 import { initCanvasApi } from "~/shared/canvas-api";
 import { subscribeFontLoadingDone } from "./shared/font-weight-support";
-import { subscribeSelected } from "./instance-selected";
+import { subscribeSelected } from "./selected-instance-effects";
+import { subscribeGridGuidesOnSelected } from "./grid-guide-utils";
 import { subscribeScrollNewInstanceIntoView } from "./shared/scroll-new-instance-into-view";
-import { $selectedPage } from "~/shared/awareness";
+import { $selectedPage } from "~/shared/nano-states";
 import { createInstanceElement } from "./elements";
 import { subscribeScrollbarSize } from "./scrollbar-width";
 import { compareMedia } from "@webstudio-is/css-engine";
 import { builderApi } from "~/shared/builder-api";
 import { useDebounceEffect } from "@webstudio-is/design-system";
 import { subscribeInstanceContextMenu } from "./instance-context-menu";
+import { startPointerTracking } from "~/shared/awareness";
 
 registerContainers();
 
@@ -107,6 +102,7 @@ const handleError = (error: unknown) => {
 };
 
 const useElementsTree = (components: Components, instances: Instances) => {
+  const isSafeMode = builderApi.isSafeMode();
   const page = useStore($selectedPage);
   const isPreviewMode = useStore($isPreviewMode);
   const breakpointsMap = useStore($breakpoints);
@@ -117,7 +113,7 @@ const useElementsTree = (components: Components, instances: Instances) => {
 
     console.info({
       $assets: $assets.get().size,
-      $pages: $pages.get()?.pages.length ?? 0,
+      $pages: $pages.get()?.pages.size ?? 0,
       $instances: $instances.get().size,
     });
   }
@@ -132,6 +128,7 @@ const useElementsTree = (components: Components, instances: Instances) => {
       <ReactSdkContext.Provider
         value={{
           renderer: isPreviewMode ? "preview" : "canvas",
+          isSafeMode,
           assetBaseUrl,
           imageLoader: wsImageLoader,
           videoLoader: wsVideoLoader,
@@ -152,7 +149,14 @@ const useElementsTree = (components: Components, instances: Instances) => {
         })}
       </ReactSdkContext.Provider>
     );
-  }, [instances, rootInstanceId, components, isPreviewMode, breakpoints]);
+  }, [
+    instances,
+    rootInstanceId,
+    components,
+    isPreviewMode,
+    breakpoints,
+    isSafeMode,
+  ]);
 };
 
 const DesignMode = () => {
@@ -169,8 +173,10 @@ const DesignMode = () => {
       abortController.signal
     );
     const unsubscribeSelected = subscribeSelected(debounceEffect);
+    const unsubscribeGridGuides = subscribeGridGuidesOnSelected();
     return () => {
       unsubscribeSelected();
+      unsubscribeGridGuides();
       abortController.abort();
     };
   }, [debounceEffect]);
@@ -197,7 +203,7 @@ const DesignMode = () => {
   return null;
 };
 
-const ContentEditMode = () => {
+const ContentEditMode = (): ReactNode => {
   const debounceEffect = useDebounceEffect();
   const ref = useRef<undefined | Instances>(undefined);
 
@@ -209,8 +215,10 @@ const ContentEditMode = () => {
       abortController.signal
     );
     const unsubscribeSelected = subscribeSelected(debounceEffect);
+    const unsubscribeGridGuides = subscribeGridGuidesOnSelected();
     return () => {
       unsubscribeSelected();
+      unsubscribeGridGuides();
       abortController.abort();
     };
   }, [debounceEffect]);
@@ -225,11 +233,14 @@ const ContentEditMode = () => {
     subscribeFontLoadingDone(options);
     initCopyPasteForContentEditMode(options);
     subscribeModifierKeys(options);
+    // E2E tests wait for this after opening content mode before editing canvas text.
+    document.body.dataset.wsContentEditMode = "ready";
     return () => {
+      delete document.body.dataset.wsContentEditMode;
       abortController.abort();
     };
   }, []);
-  return null;
+  return;
 };
 
 export const Canvas = () => {
@@ -238,31 +249,9 @@ export const Canvas = () => {
   const isContentMode = useStore($isContentMode);
 
   useMount(() => {
-    registerComponentLibrary({
-      components: {},
-      metas: coreMetas,
-      templates: coreTemplates,
-    });
-    registerComponentLibrary({
-      components: baseComponents,
-      metas: baseComponentMetas,
-      hooks: baseComponentHooks,
-      templates: baseComponentTemplates,
-    });
-    registerComponentLibrary({
-      namespace: "@webstudio-is/sdk-components-react-radix",
-      components: radixComponents,
-      metas: radixComponentMetas,
-      hooks: radixComponentHooks,
-      templates: radixTemplates,
-    });
-    registerComponentLibrary({
-      namespace: "@webstudio-is/sdk-components-animation",
-      components: animationComponents,
-      metas: animationComponentMetas,
-      hooks: animationComponentHooks,
-      templates: animationTemplates,
-    });
+    for (const library of canvasComponentLibraries) {
+      registerComponentLibrary(library);
+    }
   });
 
   useMount(initCanvasApi);
@@ -282,22 +271,23 @@ export const Canvas = () => {
   }, []);
 
   const selectedPage = useStore($selectedPage);
+  const rootInstanceId = selectedPage?.rootInstanceId;
 
   useEffect(() => {
-    const rootInstanceId = selectedPage?.rootInstanceId;
     if (rootInstanceId !== undefined) {
-      setDataCollapsed(rootInstanceId);
+      inflateInstance(rootInstanceId);
     }
-  });
+  }, [rootInstanceId]);
 
   useWindowResizeDebounced(() => {
-    const rootInstanceId = selectedPage?.rootInstanceId;
     if (rootInstanceId !== undefined) {
-      setDataCollapsed(rootInstanceId);
+      inflateInstance(rootInstanceId);
     }
   });
 
-  useEffect(subscribeCollapsed, []);
+  useEffect(subscribeInflator, []);
+
+  useEffect(() => startPointerTracking(), []);
 
   useHashLinkSync();
 

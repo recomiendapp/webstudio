@@ -11,12 +11,9 @@ import {
   theme,
 } from "@webstudio-is/design-system";
 import { TrashIcon, PlusIcon } from "@webstudio-is/icons";
-import { isLiteralExpression } from "@webstudio-is/sdk";
-import { computeExpression } from "~/shared/data-variables";
-import {
-  BindingControl,
-  BindingPopover,
-} from "~/builder/shared/binding-popover";
+import { isLiteralExpression } from "@webstudio-is/expression";
+import { computeExpression } from "@webstudio-is/project-build/runtime";
+import { BindableExpressionControl } from "~/builder/shared/bindable-expression";
 import { $pageRootScope } from "./page-utils";
 
 type Meta = {
@@ -27,11 +24,15 @@ type Meta = {
 type CustomMetadataProps = {
   customMetas: Meta[];
   onChange: (value: Meta[]) => void;
+  disabled?: boolean;
+  showBindingControls?: boolean;
 };
 
 const MetadataItem = (props: {
   property: string;
   content: string;
+  disabled?: boolean;
+  showBindingControls?: boolean;
   onDelete: () => void;
   onChange: (property: string, content: string) => void;
 }) => {
@@ -61,6 +62,7 @@ const MetadataItem = (props: {
           css={{ gridArea: "property-input" }}
           id={propertyId}
           property="path"
+          disabled={props.disabled}
           value={props.property}
           onChange={(event) => {
             props.onChange(event.target.value, props.content);
@@ -70,38 +72,34 @@ const MetadataItem = (props: {
       <Label htmlFor={contentId} css={{ gridArea: "content" }}>
         Content
       </Label>
-      <BindingControl>
-        <BindingPopover
-          scope={scope}
-          aliases={aliases}
-          variant={isLiteralExpression(props.content) ? "default" : "bound"}
-          value={props.content}
-          onChange={(value) => {
-            props.onChange(props.property, value);
-          }}
-          onRemove={(evaluatedValue) => {
-            props.onChange(props.property, JSON.stringify(evaluatedValue));
-          }}
-        />
-        <InputErrorsTooltip errors={undefined}>
-          <InputField
-            css={{
-              gridArea: "content-input",
-            }}
-            disabled={isLiteralExpression(props.content) === false}
-            color={typeof content !== "string" ? "error" : undefined}
-            id={contentId}
-            property="path"
-            value={content}
-            onChange={(event) => {
-              props.onChange(
-                props.property,
-                JSON.stringify(event.target.value)
-              );
-            }}
-          />
-        </InputErrorsTooltip>
-      </BindingControl>
+      <BindableExpressionControl
+        expression={props.content}
+        value={String(content ?? "")}
+        bound={isLiteralExpression(props.content) === false}
+        showBinding={props.showBindingControls}
+        scope={scope}
+        aliases={aliases}
+        onChangeValue={(value) =>
+          props.onChange(props.property, JSON.stringify(value))
+        }
+        onChangeExpression={(value) => props.onChange(props.property, value)}
+        onRemove={(value) =>
+          props.onChange(props.property, JSON.stringify(value ?? ""))
+        }
+        renderControl={({ value, readOnly, onChangeValue }) => (
+          <InputErrorsTooltip errors={undefined}>
+            <InputField
+              css={{ gridArea: "content-input" }}
+              disabled={props.disabled || readOnly}
+              color={typeof content !== "string" ? "error" : undefined}
+              id={contentId}
+              property="path"
+              value={value}
+              onChange={(event) => onChangeValue(event.target.value)}
+            />
+          </InputErrorsTooltip>
+        )}
+      />
       <Grid
         css={{
           gridArea: "button",
@@ -123,6 +121,7 @@ const MetadataItem = (props: {
         <SmallIconButton
           variant="destructive"
           icon={<TrashIcon />}
+          disabled={props.disabled}
           onClick={props.onDelete}
         />
 
@@ -141,9 +140,9 @@ const MetadataItem = (props: {
 };
 
 export const CustomMetadata = (props: CustomMetadataProps) => {
+  const showBindingControls = props.showBindingControls ?? true;
   return (
-    <Grid gap={2} css={{ my: theme.spacing[5], mx: theme.spacing[8] }}>
-      <Label text="title">Custom Metadata</Label>
+    <Grid gap={2}>
       <Text color="subtle">
         Use this section to input metadata for the document, which will be used
         to generate{" "}
@@ -160,13 +159,14 @@ export const CustomMetadata = (props: CustomMetadataProps) => {
         </Text>{" "}
         attribute, specifying its value.
       </Text>
-      <div />
       <Grid gap={3}>
         {props.customMetas.map((meta, index) => (
           <MetadataItem
             key={index}
             property={meta.property}
             content={meta.content}
+            disabled={props.disabled}
+            showBindingControls={showBindingControls}
             onChange={(property, content) => {
               const newCustomMetas = [...props.customMetas];
               newCustomMetas[index] = { property, content };
@@ -187,6 +187,7 @@ export const CustomMetadata = (props: CustomMetadataProps) => {
             justifySelf: "center",
           }}
           prefix={<PlusIcon />}
+          disabled={props.disabled}
           onClick={() => {
             const newCustomMetas = [
               ...props.customMetas,

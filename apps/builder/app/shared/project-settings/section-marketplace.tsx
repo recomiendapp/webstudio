@@ -16,12 +16,13 @@ import {
   Select,
   Box,
 } from "@webstudio-is/design-system";
-import { Image, wsImageLoader } from "@webstudio-is/image";
+import { getImageAttributes, wsImageLoader } from "@webstudio-is/image";
 import { useState } from "react";
 import {
-  MarketplaceProduct,
+  type MarketplaceProduct,
   marketplaceCategories,
 } from "@webstudio-is/project-build";
+import { marketplaceProductUpdateInput } from "@webstudio-is/project-build/runtime";
 import { ImageControl } from "./image-control";
 import {
   $assets,
@@ -29,10 +30,10 @@ import {
   $project,
 } from "~/shared/sync/data-stores";
 import { useIds } from "~/shared/form-utils";
-import { MarketplaceApprovalStatus } from "@webstudio-is/project";
-import { serverSyncStore } from "~/shared/sync/sync-stores";
+import type { MarketplaceApprovalStatus } from "@webstudio-is/project";
 import { trpcClient } from "~/shared/trpc/trpc-client";
 import { rightPanelWidth, sectionSpacing } from "./utils";
+import { executeRuntimeMutation } from "../instance-utils/data";
 
 const thumbnailStyle = css({
   borderRadius: theme.borderRadius[4],
@@ -61,10 +62,10 @@ const defaultMarketplaceProduct: Partial<MarketplaceProduct> = {
   category: "sectionTemplates",
 };
 
-const validate = (data: MarketplaceProduct) => {
-  const parsedResult = MarketplaceProduct.safeParse(data);
+const validate = (data: Partial<MarketplaceProduct>) => {
+  const parsedResult = marketplaceProductUpdateInput.safeParse(data);
   if (parsedResult.success === false) {
-    return parsedResult.error.formErrors.fieldErrors;
+    return parsedResult.error.flatten().fieldErrors;
   }
 };
 
@@ -123,7 +124,10 @@ const useMarketplaceApprovalStatus = () => {
 export const SectionMarketplace = () => {
   const project = useStore($project);
   const approval = useMarketplaceApprovalStatus();
-  const [data, setData] = useState(() => $marketplaceProduct.get());
+  const [data, setData] = useState<Partial<MarketplaceProduct>>(() => ({
+    ...defaultMarketplaceProduct,
+    ...$marketplaceProduct.get(),
+  }));
   const ids = useIds([
     "name",
     "category",
@@ -138,10 +142,11 @@ export const SectionMarketplace = () => {
   const [isConfirmed, setIsConfirmed] = useState<boolean>(false);
   const [errors, setErrors] = useState<ReturnType<typeof validate>>();
 
-  if (data === undefined || project === undefined) {
+  if (project === undefined) {
     return;
   }
   const asset = assets.get(data.thumbnailAssetId ?? "");
+  const isValid = marketplaceProductUpdateInput.safeParse(data).success;
 
   const handleSave = <Setting extends keyof MarketplaceProduct>(
     setting: Setting
@@ -159,15 +164,14 @@ export const SectionMarketplace = () => {
       if (errors) {
         return;
       }
-      serverSyncStore.createTransaction(
-        [$marketplaceProduct],
-        (marketplaceProduct) => {
-          if (marketplaceProduct === undefined) {
-            return;
-          }
-          Object.assign(marketplaceProduct, nextData);
-        }
-      );
+      const result = marketplaceProductUpdateInput.safeParse(nextData);
+      if (result.success === false) {
+        return;
+      }
+      executeRuntimeMutation({
+        id: "projectSettings.updateMarketplaceProduct",
+        input: result.data,
+      });
     };
   };
 
@@ -177,7 +181,7 @@ export const SectionMarketplace = () => {
         Marketplace
       </Text>
       <Grid gap={1} css={sectionSpacing}>
-        <Label htmlFor={ids.name}>Product Name</Label>
+        <Label htmlFor={ids.name}>Product name</Label>
         <InputErrorsTooltip errors={errors?.name}>
           <InputField
             id={ids.name}
@@ -214,12 +218,14 @@ export const SectionMarketplace = () => {
         <InputErrorsTooltip errors={errors?.thumbnailAssetId}>
           <Grid flow="column" gap={3}>
             <Box className={thumbnailStyle()}>
-              <Image
+              <img
                 className={thumbnailImageStyle({
                   hasAsset: asset !== undefined,
                 })}
-                src={asset ? `${asset.name}` : undefined}
-                loader={wsImageLoader}
+                {...getImageAttributes({
+                  src: asset ? `${asset.name}` : undefined,
+                  loader: wsImageLoader,
+                })}
               />
             </Box>
 
@@ -279,7 +285,7 @@ export const SectionMarketplace = () => {
       </Grid>
 
       <Grid gap={1} css={sectionSpacing}>
-        <Label htmlFor={ids.issues}>Issues Tracker</Label>
+        <Label htmlFor={ids.issues}>Issues tracker</Label>
         <InputErrorsTooltip errors={errors?.issues}>
           <InputField
             id={ids.issues}
@@ -341,7 +347,7 @@ export const SectionMarketplace = () => {
         {approval.status === "UNLISTED" ? (
           <Button
             color="primary"
-            disabled={isConfirmed === false || errors !== undefined}
+            disabled={isConfirmed === false || isValid === false}
             state={approval.state === "idle" ? undefined : "pending"}
             onClick={approval.submit}
           >

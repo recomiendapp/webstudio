@@ -7,31 +7,6 @@ export type Json =
   | Json[];
 
 export type Database = {
-  graphql_public: {
-    Tables: {
-      [_ in never]: never;
-    };
-    Views: {
-      [_ in never]: never;
-    };
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json;
-          operationName?: string;
-          query?: string;
-          variables?: Json;
-        };
-        Returns: Json;
-      };
-    };
-    Enums: {
-      [_ in never]: never;
-    };
-    CompositeTypes: {
-      [_ in never]: never;
-    };
-  };
   public: {
     Tables: {
       _prisma_migrations: {
@@ -71,6 +46,7 @@ export type Database = {
         Row: {
           description: string | null;
           filename: string | null;
+          folderId: string | null;
           id: string;
           name: string;
           projectId: string;
@@ -78,6 +54,7 @@ export type Database = {
         Insert: {
           description?: string | null;
           filename?: string | null;
+          folderId?: string | null;
           id: string;
           name: string;
           projectId: string;
@@ -85,11 +62,19 @@ export type Database = {
         Update: {
           description?: string | null;
           filename?: string | null;
+          folderId?: string | null;
           id?: string;
           name?: string;
           projectId?: string;
         };
         Relationships: [
+          {
+            foreignKeyName: "Asset_folderId_projectId_fkey";
+            columns: ["folderId", "projectId"];
+            isOneToOne: false;
+            referencedRelation: "AssetFolder";
+            referencedColumns: ["id", "projectId"];
+          },
           {
             foreignKeyName: "Asset_name_fkey";
             columns: ["name"];
@@ -99,11 +84,93 @@ export type Database = {
           },
         ];
       };
+      AssetFileMetadata: {
+        Row: {
+          assetId: string;
+          createdAt: string;
+          document: Json;
+          projectId: string;
+          revision: string;
+          updatedAt: string;
+        };
+        Insert: {
+          assetId: string;
+          createdAt?: string;
+          document: Json;
+          projectId: string;
+          revision: string;
+          updatedAt?: string;
+        };
+        Update: {
+          assetId?: string;
+          createdAt?: string;
+          document?: Json;
+          projectId?: string;
+          revision?: string;
+          updatedAt?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "AssetFileMetadata_assetId_projectId_fkey";
+            columns: ["assetId", "projectId"];
+            isOneToOne: false;
+            referencedRelation: "Asset";
+            referencedColumns: ["id", "projectId"];
+          },
+        ];
+      };
+      AssetFolder: {
+        Row: {
+          createdAt: string;
+          id: string;
+          name: string;
+          parentId: string | null;
+          projectId: string;
+        };
+        Insert: {
+          createdAt?: string;
+          id?: string;
+          name: string;
+          parentId?: string | null;
+          projectId: string;
+        };
+        Update: {
+          createdAt?: string;
+          id?: string;
+          name?: string;
+          parentId?: string | null;
+          projectId?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "AssetFolder_parentId_projectId_fkey";
+            columns: ["parentId", "projectId"];
+            isOneToOne: false;
+            referencedRelation: "AssetFolder";
+            referencedColumns: ["id", "projectId"];
+          },
+          {
+            foreignKeyName: "AssetFolder_projectId_fkey";
+            columns: ["projectId"];
+            isOneToOne: false;
+            referencedRelation: "DashboardProject";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "AssetFolder_projectId_fkey";
+            columns: ["projectId"];
+            isOneToOne: false;
+            referencedRelation: "Project";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       AuthorizationToken: {
         Row: {
           canClone: boolean;
           canCopy: boolean;
           canPublish: boolean;
+          canUseApi: boolean;
           createdAt: string;
           name: string;
           projectId: string;
@@ -114,6 +181,7 @@ export type Database = {
           canClone?: boolean;
           canCopy?: boolean;
           canPublish?: boolean;
+          canUseApi?: boolean;
           createdAt?: string;
           name?: string;
           projectId: string;
@@ -124,6 +192,7 @@ export type Database = {
           canClone?: boolean;
           canCopy?: boolean;
           canPublish?: boolean;
+          canUseApi?: boolean;
           createdAt?: string;
           name?: string;
           projectId?: string;
@@ -160,6 +229,7 @@ export type Database = {
           marketplaceProduct: string;
           pages: string;
           projectId: string;
+          projectSettings: string;
           props: string;
           publishStatus: Database["public"]["Enums"]["PublishStatus"];
           resources: string;
@@ -181,6 +251,7 @@ export type Database = {
           marketplaceProduct?: string;
           pages: string;
           projectId: string;
+          projectSettings?: string;
           props?: string;
           publishStatus?: Database["public"]["Enums"]["PublishStatus"];
           resources?: string;
@@ -202,6 +273,7 @@ export type Database = {
           marketplaceProduct?: string;
           pages?: string;
           projectId?: string;
+          projectSettings?: string;
           props?: string;
           publishStatus?: Database["public"]["Enums"]["PublishStatus"];
           resources?: string;
@@ -356,6 +428,7 @@ export type Database = {
       };
       File: {
         Row: {
+          contentHash: string | null;
           createdAt: string;
           description: string | null;
           format: string;
@@ -368,6 +441,7 @@ export type Database = {
           uploaderProjectId: string | null;
         };
         Insert: {
+          contentHash?: string | null;
           createdAt?: string;
           description?: string | null;
           format: string;
@@ -380,6 +454,7 @@ export type Database = {
           uploaderProjectId?: string | null;
         };
         Update: {
+          contentHash?: string | null;
           createdAt?: string;
           description?: string | null;
           format?: string;
@@ -425,7 +500,7 @@ export type Database = {
           domainsVirtualId: string;
           projectId: string;
           publishStatus: Database["public"]["Enums"]["PublishStatus"];
-          updatedAt: string;
+          updatedAt?: string;
         };
         Update: {
           buildId?: string;
@@ -481,6 +556,39 @@ export type Database = {
           },
         ];
       };
+      Notification: {
+        Row: {
+          createdAt: string;
+          id: string;
+          payload: Json;
+          recipientId: string;
+          respondedAt: string | null;
+          senderId: string;
+          status: string;
+          type: string;
+        };
+        Insert: {
+          createdAt?: string;
+          id?: string;
+          payload?: Json;
+          recipientId: string;
+          respondedAt?: string | null;
+          senderId: string;
+          status?: string;
+          type: string;
+        };
+        Update: {
+          createdAt?: string;
+          id?: string;
+          payload?: Json;
+          recipientId?: string;
+          respondedAt?: string | null;
+          senderId?: string;
+          status?: string;
+          type?: string;
+        };
+        Relationships: [];
+      };
       Product: {
         Row: {
           createdAt: string;
@@ -522,6 +630,7 @@ export type Database = {
           tags: string[] | null;
           title: string;
           userId: string | null;
+          workspaceId: string | null;
         };
         Insert: {
           createdAt?: string;
@@ -533,6 +642,7 @@ export type Database = {
           tags?: string[] | null;
           title: string;
           userId?: string | null;
+          workspaceId?: string | null;
         };
         Update: {
           createdAt?: string;
@@ -544,6 +654,7 @@ export type Database = {
           tags?: string[] | null;
           title?: string;
           userId?: string | null;
+          workspaceId?: string | null;
         };
         Relationships: [
           {
@@ -558,6 +669,13 @@ export type Database = {
             columns: ["userId"];
             isOneToOne: false;
             referencedRelation: "User";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "Project_workspaceId_fkey";
+            columns: ["workspaceId"];
+            isOneToOne: false;
+            referencedRelation: "Workspace";
             referencedColumns: ["id"];
           },
         ];
@@ -607,18 +725,6 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
-      };
-      Team: {
-        Row: {
-          id: string;
-        };
-        Insert: {
-          id: string;
-        };
-        Update: {
-          id?: string;
-        };
-        Relationships: [];
       };
       TransactionLog: {
         Row: {
@@ -688,7 +794,6 @@ export type Database = {
           image: string | null;
           projectsTags: Json;
           provider: string | null;
-          teamId: string | null;
           username: string | null;
         };
         Insert: {
@@ -698,7 +803,6 @@ export type Database = {
           image?: string | null;
           projectsTags?: Json;
           provider?: string | null;
-          teamId?: string | null;
           username?: string | null;
         };
         Update: {
@@ -708,15 +812,80 @@ export type Database = {
           image?: string | null;
           projectsTags?: Json;
           provider?: string | null;
-          teamId?: string | null;
           username?: string | null;
+        };
+        Relationships: [];
+      };
+      Workspace: {
+        Row: {
+          createdAt: string;
+          id: string;
+          isDefault: boolean;
+          isDeleted: boolean;
+          name: string;
+          userId: string;
+        };
+        Insert: {
+          createdAt?: string;
+          id?: string;
+          isDefault?: boolean;
+          isDeleted?: boolean;
+          name: string;
+          userId: string;
+        };
+        Update: {
+          createdAt?: string;
+          id?: string;
+          isDefault?: boolean;
+          isDeleted?: boolean;
+          name?: string;
+          userId?: string;
         };
         Relationships: [
           {
-            foreignKeyName: "User_teamId_fkey";
-            columns: ["teamId"];
+            foreignKeyName: "Workspace_userId_fkey";
+            columns: ["userId"];
             isOneToOne: false;
-            referencedRelation: "Team";
+            referencedRelation: "User";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      WorkspaceMember: {
+        Row: {
+          createdAt: string;
+          relation: Database["public"]["Enums"]["AuthorizationRelation"];
+          removedAt: string | null;
+          userId: string;
+          workspaceId: string;
+        };
+        Insert: {
+          createdAt?: string;
+          relation?: Database["public"]["Enums"]["AuthorizationRelation"];
+          removedAt?: string | null;
+          userId: string;
+          workspaceId: string;
+        };
+        Update: {
+          createdAt?: string;
+          relation?: Database["public"]["Enums"]["AuthorizationRelation"];
+          removedAt?: string | null;
+          userId?: string;
+          workspaceId?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "WorkspaceMember_userId_fkey";
+            columns: ["userId"];
+            isOneToOne: false;
+            referencedRelation: "User";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "WorkspaceMember_workspaceId_fkey";
+            columns: ["workspaceId"];
+            isOneToOne: false;
+            referencedRelation: "Workspace";
             referencedColumns: ["id"];
           },
         ];
@@ -760,6 +929,7 @@ export type Database = {
           tags: string[] | null;
           title: string | null;
           userId: string | null;
+          workspaceId: string | null;
         };
         Insert: {
           createdAt?: string | null;
@@ -774,6 +944,7 @@ export type Database = {
           tags?: string[] | null;
           title?: string | null;
           userId?: string | null;
+          workspaceId?: string | null;
         };
         Update: {
           createdAt?: string | null;
@@ -788,6 +959,7 @@ export type Database = {
           tags?: string[] | null;
           title?: string | null;
           userId?: string | null;
+          workspaceId?: string | null;
         };
         Relationships: [
           {
@@ -802,6 +974,13 @@ export type Database = {
             columns: ["userId"];
             isOneToOne: false;
             referencedRelation: "User";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "Project_workspaceId_fkey";
+            columns: ["workspaceId"];
+            isOneToOne: false;
+            referencedRelation: "Workspace";
             referencedColumns: ["id"];
           },
         ];
@@ -891,6 +1070,14 @@ export type Database = {
         };
         Relationships: [];
       };
+      WorkspaceProjectAuthorization: {
+        Row: {
+          projectId: string | null;
+          relation: string | null;
+          userId: string | null;
+        };
+        Relationships: [];
+      };
     };
     Functions: {
       clone_project: {
@@ -910,6 +1097,7 @@ export type Database = {
           tags: string[] | null;
           title: string;
           userId: string | null;
+          workspaceId: string | null;
         };
         SetofOptions: {
           from: "*";
@@ -925,6 +1113,19 @@ export type Database = {
       database_cleanup: {
         Args: { from_date?: string; to_date?: string };
         Returns: undefined;
+      };
+      delete_asset_file_metadata_if_matches: {
+        Args: {
+          p_asset_id: string;
+          p_document: Json;
+          p_project_id: string;
+          p_revision: string;
+        };
+        Returns: number;
+      };
+      delete_stale_asset_file_metadata: {
+        Args: { p_asset_ids: string[]; p_project_id: string };
+        Returns: number;
       };
       domainsVirtual: {
         Args: { "": Database["public"]["Tables"]["Project"]["Row"] };
@@ -950,6 +1151,26 @@ export type Database = {
         };
       };
       latestBuildVirtual:
+        | {
+            Args: {
+              "": Database["public"]["Views"]["DashboardProject"]["Row"];
+            };
+            Returns: {
+              buildId: string;
+              createdAt: string;
+              domain: string;
+              domainsVirtualId: string;
+              projectId: string;
+              publishStatus: Database["public"]["Enums"]["PublishStatus"];
+              updatedAt: string;
+            };
+            SetofOptions: {
+              from: '"DashboardProject"';
+              to: "latestBuildVirtual";
+              isOneToOne: true;
+              isSetofReturn: true;
+            };
+          }
         | {
             Args: { "": Database["public"]["Tables"]["domainsVirtual"]["Row"] };
             Returns: {
@@ -1004,8 +1225,27 @@ export type Database = {
           isSetofReturn: true;
         };
       };
+      replace_asset_file_metadata: {
+        Args: {
+          p_asset_id: string;
+          p_document: Json;
+          p_project_id: string;
+          p_revision: string;
+          p_source: Json;
+        };
+        Returns: boolean;
+      };
       restore_development_build: {
         Args: { from_build_id: string; project_id: string };
+        Returns: string;
+      };
+      swap_asset_file: {
+        Args: {
+          asset_id: string;
+          expected_name: string;
+          project_id: string;
+          replacement_name: string;
+        };
         Returns: string;
       };
     };
@@ -1151,9 +1391,6 @@ export type CompositeTypes<
     : never;
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       AuthorizationRelation: [

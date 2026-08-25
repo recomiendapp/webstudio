@@ -26,12 +26,13 @@
   "customizations": {
     "vscode": {
       "extensions": [
-        "esbenp.prettier-vscode",
+        "oxc.oxc-vscode",
         "redhat.vscode-yaml",
         "me-dutour-mathieu.vscode-github-actions",
         "eamodio.gitlens",
         "bradymholt.pgformatter",
-        "YoavBls.pretty-ts-errors"
+        "YoavBls.pretty-ts-errors",
+        "typescriptteam.native-preview"
       ]
     }
   }

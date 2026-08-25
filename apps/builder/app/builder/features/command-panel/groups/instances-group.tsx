@@ -11,8 +11,13 @@ import { parseComponentName } from "@webstudio-is/sdk";
 import type { Instance } from "@webstudio-is/sdk";
 import { $instances, $pages } from "~/shared/sync/data-stores";
 import { getInstanceLabel } from "~/builder/shared/instance-label";
-import { $awareness, findAwarenessByInstanceId } from "~/shared/awareness";
-import { closeCommandPanel, $isCommandPanelOpen } from "../command-state";
+import { $selectedPageId, selectInstance } from "~/shared/nano-states";
+import { findPageAndSelectorByInstanceId } from "@webstudio-is/project-build/runtime";
+import {
+  closeCommandPanel,
+  $commandSearch,
+  $isCommandPanelOpen,
+} from "../command-state";
 import type { BaseOption } from "../shared/types";
 import { setActiveSidebarPanel } from "~/builder/shared/nano-states";
 import { humanizeString } from "~/shared/string-utils";
@@ -25,9 +30,13 @@ export type InstanceOption = BaseOption & {
 };
 
 export const $instanceOptions = computed(
-  [$isCommandPanelOpen, $instances, $pages],
-  (isOpen, instances, pages) => {
-    if (!isOpen || !pages) {
+  [$isCommandPanelOpen, $commandSearch, $instances, $pages],
+  (isCommandPanelOpen, commandSearch, instances, pages) => {
+    if (
+      isCommandPanelOpen === false ||
+      commandSearch.trim().length === 0 ||
+      pages === undefined
+    ) {
       return [];
     }
     const instanceOptions: InstanceOption[] = [];
@@ -79,13 +88,14 @@ export const InstancesGroup = ({ options }: { options: InstanceOption[] }) => {
               const pages = $pages.get();
               const instances = $instances.get();
               if (pages && instances) {
-                const awareness = findAwarenessByInstanceId(
+                const awareness = findPageAndSelectorByInstanceId(
                   pages,
                   instances,
                   instance.id
                 );
                 if (awareness) {
-                  $awareness.set(awareness);
+                  $selectedPageId.set(awareness.pageId);
+                  selectInstance(awareness.instanceSelector);
                   setActiveSidebarPanel("auto");
                 }
               }

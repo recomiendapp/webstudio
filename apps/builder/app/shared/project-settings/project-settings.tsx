@@ -6,7 +6,7 @@ import {
   DialogTitle,
   Grid,
   theme,
-  ScrollArea,
+  ScrollAreaNative,
   Flex,
   List,
   ListItem,
@@ -21,21 +21,30 @@ import {
 import { $isDesignMode } from "~/shared/nano-states";
 import { leftPanelWidth, rightPanelWidth } from "./utils";
 import { SectionGeneral } from "./section-general";
+import { SectionAgents } from "./section-agents";
+import { SectionAuth } from "./section-auth";
 import { SectionRedirects } from "./section-redirects";
 import { SectionPublish } from "./section-publish";
 import { SectionMarketplace } from "./section-marketplace";
 import { SectionBackups } from "./section-backups";
+import { titleCase } from "title-case";
 
 const sections = new Map<
   SectionName,
   FunctionComponent<{ projectId?: string }>
 >([
   ["general", SectionGeneral],
+  ["agents", SectionAgents],
   ["redirects", SectionRedirects],
   ["publish", SectionPublish],
   ["marketplace", SectionMarketplace],
   ["backups", SectionBackups],
+  ["auth", SectionAuth],
 ] as const);
+
+const sectionLabels = new Map<SectionName, string>([
+  ["auth", "Authentication"],
+]);
 
 export const ProjectSettingsDialog = ({
   currentSection,
@@ -107,8 +116,8 @@ export const ProjectSettingsDialog = ({
                         }}
                         align="center"
                       >
-                        <Text variant="labelsTitleCase" truncate>
-                          {name}
+                        <Text variant="labels" truncate>
+                          {sectionLabels.get(name) ?? titleCase(name)}
                         </Text>
                       </Flex>
                     </ListItem>
@@ -116,24 +125,30 @@ export const ProjectSettingsDialog = ({
                 })}
               </Flex>
             </List>
-            <ScrollArea css={{ width: "100%" }}>
+            <ScrollAreaNative css={{ width: "100%" }}>
               {status === "loading" ? (
                 <Flex justify="center" align="center" css={{ minHeight: 400 }}>
                   <SpinnerIcon size={rawTheme.spacing[15]} />
                 </Flex>
               ) : (
-                <Grid gap={2} css={{ paddingBlock: theme.spacing[5] }}>
+                <Grid
+                  gap={2}
+                  css={{
+                    paddingBlock: theme.spacing[5],
+                    minHeight: currentSection === "agents" ? "100%" : undefined,
+                  }}
+                >
                   {SectionComponent && (
                     <SectionComponent projectId={projectId} />
                   )}
                 </Grid>
               )}
-            </ScrollArea>
+            </ScrollAreaNative>
           </Flex>
           {/* Title is at the end intentionally,
            * to make the close button last in the tab order
            */}
-          <DialogTitle>Project Settings</DialogTitle>
+          <DialogTitle>Project settings</DialogTitle>
         </fieldset>
       </DialogContent>
     </Dialog>

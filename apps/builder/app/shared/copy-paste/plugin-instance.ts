@@ -1,51 +1,69 @@
+import {
+  extractWebstudioFragment,
+  findSafeFragmentPasteTarget,
+  getCommonAncestorSelector,
+  getPasteRootInstanceIds,
+  getFragmentContentModelWarnings,
+  mergeWebstudioFragments,
+} from "@webstudio-is/project-build/runtime";
+import {
+  instanceTransferDataVersion,
+  instancesTransferDataVersion,
+  parseInstanceTransferData,
+  type InstanceTransferData,
+  type InstancesTransferData,
+} from "@webstudio-is/project-build/transfer";
+import { findClosestInsertable } from "../instance-utils/insert";
+import {
+  executeRuntimeMutationAsync,
+  getWebstudioData,
+} from "../instance-utils/data";
+import { type Insertable } from "../instance-utils/insert";
 import { shallowEqual } from "shallow-equal";
-import { z } from "zod";
 import { toast } from "@webstudio-is/design-system";
 import {
-  Instance,
-  Instances,
-  WebstudioFragment,
-  findTreeInstanceIdsExcludingSlotDescendants,
+  type Instance,
+  type WebstudioFragment,
   isComponentDetachable,
-  portalComponent,
 } from "@webstudio-is/sdk";
+import { $instances } from "~/shared/sync/data-stores";
 import {
+  type InstanceSelector,
+  sortInstancePathsForChildMutation,
+} from "@webstudio-is/project-build/runtime";
+import { findChildReferenceIndex } from "@webstudio-is/project-build/runtime";
+import { deleteInstanceBySelector } from "../instance-utils/mutation";
+import {
+  $allSelectedInstanceSelectors,
+  clearInstanceSelection,
+  $selectedInstancePath,
   $selectedInstanceSelector,
-  $instances,
-  $project,
-} from "../nano-states";
-import type { InstanceSelector } from "../tree-utils";
-import {
-  deleteInstanceMutable,
-  extractWebstudioFragment,
-  insertWebstudioFragmentCopy,
-  updateWebstudioData,
-  getWebstudioData,
-  insertInstanceChildrenMutable,
-  findClosestInsertable,
-  insertFragmentWithConflictResolution,
-  type Insertable,
-} from "../instance-utils";
-import { $selectedInstancePath } from "../awareness";
-import { findAvailableVariables } from "../data-variables";
-import type { Plugin } from "./init-copy-paste";
+  $registeredComponentMetas,
+  selectInstances,
+} from "~/shared/nano-states";
+import { getInstancePath } from "@webstudio-is/project-build/runtime";
+import { builderApi } from "../builder-api";
+import { pasteHandled, pasteIgnored, type Plugin } from "./copy-paste";
+import { breakpointPasteLimitWarning } from "@webstudio-is/project-build/runtime";
+import { resolveFragmentTokenConflicts } from "../resolve-token-conflicts";
+import { reportFragmentContentModelWarnings } from "./fragment-utils";
 
-const version = "@webstudio/instance/v0.1";
+const invalidPasteDataMessage =
+  "Could not paste Webstudio instance data. The clipboard data appears to be incomplete or invalid.";
 
-const InstanceData = WebstudioFragment.extend({
-  instanceSelector: z.array(z.string()),
-});
-
-type InstanceData = z.infer<typeof InstanceData>;
-
-const getTreeData = (instanceSelector: InstanceSelector) => {
+const getTreeData = (
+  instanceSelector: InstanceSelector,
+  { showToast = true }: { showToast?: boolean } = {}
+) => {
   const instances = $instances.get();
   const [targetInstanceId] = instanceSelector;
   const instance = instances.get(targetInstanceId);
   if (instance && !isComponentDetachable(instance.component)) {
-    toast.error(
-      "This instance can not be moved outside of its parent component."
-    );
+    if (showToast) {
+      toast.error(
+        "This instance can not be moved outside of its parent component."
+      );
+    }
     return;
   }
 
@@ -60,38 +78,103 @@ const getTreeData = (instanceSelector: InstanceSelector) => {
   };
 };
 
-const stringify = (data: InstanceData) => {
-  return JSON.stringify({ [version]: data });
+const stringify = (data: InstanceTransferData) => {
+  return JSON.stringify({ [instanceTransferDataVersion]: data });
 };
 
-const ClipboardData = z.object({ [version]: InstanceData });
+const stringifyMultiRoot = (data: InstancesTransferData) => {
+  return JSON.stringify({ [instancesTransferDataVersion]: data });
+};
 
-const parse = (clipboardData: string): InstanceData | undefined => {
-  try {
-    const data = ClipboardData.parse(JSON.parse(clipboardData));
-    return data[version];
-  } catch {
+const stringifyMultiRootSelection = (selectedData: InstanceTransferData[]) => {
+  const rootInstanceIds = selectedData.map((data) => data.instanceSelector[0]);
+  return stringifyMultiRoot({
+    rootInstanceIds,
+    fragment: mergeWebstudioFragments(rootInstanceIds, selectedData),
+  });
+};
+
+const reportSkippedSelectedInstances = (operation: "copied" | "cut") => {
+  builderApi.toast.info(`Some selected instances could not be ${operation}.`);
+};
+
+const findMultiSelectionInsertable = (
+  fragment: WebstudioFragment
+): undefined | Insertable => {
+  const selectedInstanceSelectors = $allSelectedInstanceSelectors.get();
+  if (selectedInstanceSelectors.length < 2) {
     return;
   }
-};
-
-const getPortalFragmentSelector = (
-  instances: Instances,
-  instanceSelector: InstanceSelector
-) => {
-  const instance = instances.get(instanceSelector[0]);
-  if (
-    instance?.component !== portalComponent ||
-    instance.children.length === 0 ||
-    instance.children[0].type !== "id"
-  ) {
+  const instances = $instances.get();
+  const selectedPaths = selectedInstanceSelectors
+    .map((instanceSelector) => getInstancePath(instanceSelector, instances))
+    .filter((path): path is NonNullable<typeof path> => path !== undefined);
+  if (selectedPaths.length < 2) {
     return;
   }
-  // first portal child is always fragment
-  return [instance.children[0].value, ...instanceSelector];
+
+  const directParentSelector = selectedPaths[0][1]?.instanceSelector;
+  const hasSameDirectParent =
+    directParentSelector !== undefined &&
+    selectedPaths.every((path) =>
+      shallowEqual(path[1]?.instanceSelector, directParentSelector)
+    );
+  if (hasSameDirectParent) {
+    const parentInstance = instances.get(directParentSelector[0]);
+    if (parentInstance === undefined) {
+      return;
+    }
+    const selectedSiblingIndexes = selectedPaths.map((path) =>
+      findChildReferenceIndex(parentInstance.children, path[0].instance.id)
+    );
+    if (selectedSiblingIndexes.includes(-1)) {
+      return;
+    }
+    const lastSelectedSiblingIndex = Math.max(...selectedSiblingIndexes);
+    return findPasteTargetForFragment(fragment, {
+      parentSelector: directParentSelector,
+      position: lastSelectedSiblingIndex + 1,
+    });
+  }
+
+  const commonAncestorSelector = getCommonAncestorSelector(
+    selectedPaths.map((path) => path[0].instanceSelector)
+  );
+  if (commonAncestorSelector === undefined) {
+    return;
+  }
+  return findPasteTargetForFragment(fragment, {
+    parentSelector: commonAncestorSelector,
+    position: "end",
+  });
 };
 
-const findPasteTarget = (data: InstanceData): undefined | Insertable => {
+const findSelectionPasteTarget = (fragment: WebstudioFragment) =>
+  findMultiSelectionInsertable(fragment) ??
+  findPasteTargetForFragment(fragment);
+
+const findPasteTargetForFragment = (
+  fragment: WebstudioFragment,
+  insertable?: Insertable
+): undefined | Insertable => {
+  const instances = $instances.get();
+
+  insertable = findClosestInsertable(fragment, insertable, {
+    allowContentModelWarnings: true,
+  });
+  if (insertable === undefined) {
+    return;
+  }
+  return findSafeFragmentPasteTarget({
+    fragment,
+    instances,
+    insertTarget: insertable,
+  });
+};
+
+const findPasteTarget = (
+  data: InstanceTransferData
+): undefined | Insertable => {
   const instances = $instances.get();
 
   const instanceSelector = $selectedInstanceSelector.get();
@@ -117,106 +200,182 @@ const findPasteTarget = (data: InstanceData): undefined | Insertable => {
     };
   }
 
-  const insertable = findClosestInsertable(data);
-  if (insertable === undefined) {
-    return;
-  }
-
-  if (data.instances.length === 0) {
-    return;
-  }
-
-  const newInstances: Instances = new Map();
-  for (const instance of data.instances) {
-    newInstances.set(instance.id, instance);
-  }
-  const newInstanceIds = findTreeInstanceIdsExcludingSlotDescendants(
-    newInstances,
-    data.instances[0].id
-  );
-  const preservedChildIds = new Set<Instance["id"]>();
-  for (const instance of data.instances) {
-    for (const child of instance.children) {
-      if (child.type === "id" && newInstanceIds.has(child.value) === false) {
-        preservedChildIds.add(child.value);
-      }
-    }
-  }
-
-  // portal descendants ids are preserved
-  // so need to prevent pasting portal inside its copies
-  // to avoid circular tree
-  const dropTargetSelector =
-    // consider portal fragment when check for cycles to avoid cases
-    // like pasting portal directly into portal
-    getPortalFragmentSelector(instances, insertable.parentSelector) ??
-    insertable.parentSelector;
-  for (const instanceId of dropTargetSelector) {
-    if (preservedChildIds.has(instanceId)) {
-      return;
-    }
-  }
-
-  return insertable;
+  return findSelectionPasteTarget(data);
 };
 
-const onPaste = async (clipboardData: string) => {
-  const project = $project.get();
-  const fragment = parse(clipboardData);
-  if (fragment === undefined || project === undefined) {
-    return false;
-  }
-
-  const pasteTarget = findPasteTarget(fragment);
-  if (pasteTarget === undefined) {
-    return false;
-  }
-
+const insertPastedFragment = async ({
+  fragment,
+  pasteTarget,
+  selectRootInstances,
+}: {
+  fragment: WebstudioFragment;
+  pasteTarget: Insertable;
+  selectRootInstances: (rootInstanceIds: Instance["id"][]) => void;
+}) => {
   try {
-    const conflictResolution = await insertFragmentWithConflictResolution({
+    const contentModelWarnings = getFragmentContentModelWarnings({
       fragment,
+      metas: $registeredComponentMetas.get(),
     });
-    updateWebstudioData((data) => {
-      const { newInstanceIds } = insertWebstudioFragmentCopy({
-        data,
+    const conflictResolution = await resolveFragmentTokenConflicts(fragment);
+    if (conflictResolution === "cancel") {
+      return;
+    }
+    const result = await executeRuntimeMutationAsync({
+      id: "instances.insertFragment",
+      input: {
+        parentInstanceId: pasteTarget.parentSelector[0],
         fragment,
-        availableVariables: findAvailableVariables({
-          ...data,
-          startingInstanceId: pasteTarget.parentSelector[0],
-        }),
-        projectId: project.id,
         conflictResolution,
-      });
-      const newRootInstanceId = newInstanceIds.get(fragment.instances[0].id);
-      if (newRootInstanceId === undefined) {
-        return;
-      }
-      const children: Instance["children"] = [
-        { type: "id", value: newRootInstanceId },
-      ];
-      insertInstanceChildrenMutable(data, children, pasteTarget);
+        insertIndex:
+          typeof pasteTarget.position === "number"
+            ? pasteTarget.position
+            : undefined,
+      },
+      context: { allowLegacyContentModelWarnings: true },
     });
+    const rootInstanceIds = result?.result.rootInstanceIds;
+    if (rootInstanceIds === undefined || rootInstanceIds.length === 0) {
+      return false;
+    }
+    if (result?.result.didMergeBreakpointsDueToLimit === true) {
+      toast.warn(breakpointPasteLimitWarning);
+    }
+    reportFragmentContentModelWarnings(contentModelWarnings);
+    selectRootInstances(rootInstanceIds);
   } catch (error) {
     // User cancelled
     return false;
   }
-
   return true;
 };
 
-const onCopy = () => {
-  const selectedInstanceSelector = $selectedInstanceSelector.get();
-  if (selectedInstanceSelector === undefined) {
-    return;
+const handlePasteInstance = async (clipboardData: string) => {
+  const transferData = parseInstanceTransferData(clipboardData);
+  if (transferData.owned === false) {
+    return pasteIgnored;
   }
-  const data = getTreeData(selectedInstanceSelector);
-  if (data === undefined) {
-    return;
+  if (transferData.valid === false) {
+    return { success: false, error: invalidPasteDataMessage } as const;
   }
-  return stringify(data);
+  if (transferData.type === "multi-root") {
+    const pasteRootInstanceIds = getPasteRootInstanceIds(transferData.data);
+    if (pasteRootInstanceIds.length === 0) {
+      return pasteHandled;
+    }
+    const fragment: WebstudioFragment = {
+      ...transferData.data.fragment,
+      children: pasteRootInstanceIds.map((instanceId) => ({
+        type: "id",
+        value: instanceId,
+      })),
+    };
+    const pasteTarget = findSelectionPasteTarget(fragment);
+    if (pasteTarget === undefined) {
+      return pasteHandled;
+    }
+    await insertPastedFragment({
+      fragment,
+      pasteTarget,
+      selectRootInstances: (rootInstanceIds) => {
+        selectInstances(
+          rootInstanceIds.map((newRootInstanceId) => [
+            newRootInstanceId,
+            ...pasteTarget.parentSelector,
+          ])
+        );
+      },
+    });
+    return pasteHandled;
+  }
+  const fragment = transferData.data;
+
+  const pasteTarget = findPasteTarget(fragment);
+  if (pasteTarget === undefined) {
+    return pasteHandled;
+  }
+  await insertPastedFragment({
+    fragment,
+    pasteTarget,
+    selectRootInstances: (rootInstanceIds) => {
+      const newRootInstanceId = rootInstanceIds[0];
+      if (newRootInstanceId === undefined) {
+        return;
+      }
+      selectInstances([[newRootInstanceId, ...pasteTarget.parentSelector]]);
+    },
+  });
+  return pasteHandled;
 };
 
-const onCut = () => {
+const handleCopyInstance = () => {
+  const selectedInstanceSelectors = $allSelectedInstanceSelectors.get();
+  if (selectedInstanceSelectors.length === 0) {
+    return;
+  }
+  if (selectedInstanceSelectors.length === 1) {
+    const data = getTreeData(selectedInstanceSelectors[0]);
+    if (data === undefined) {
+      return;
+    }
+    return stringify(data);
+  }
+
+  const selectedData = selectedInstanceSelectors
+    .map((instanceSelector) =>
+      getTreeData(instanceSelector, { showToast: false })
+    )
+    .filter((data): data is InstanceTransferData => data !== undefined);
+  if (selectedData.length === 0) {
+    return;
+  }
+  if (selectedData.length < selectedInstanceSelectors.length) {
+    reportSkippedSelectedInstances("copied");
+  }
+  return stringifyMultiRootSelection(selectedData);
+};
+
+const handleCutInstance = () => {
+  const selectedInstanceSelectors = $allSelectedInstanceSelectors.get();
+  if (selectedInstanceSelectors.length > 1) {
+    const instances = $instances.get();
+    const selectedPaths = selectedInstanceSelectors
+      .map((instanceSelector) => {
+        const data = getTreeData(instanceSelector, { showToast: false });
+        const instancePath =
+          data === undefined
+            ? undefined
+            : getInstancePath(data.instanceSelector, instances);
+        if (data === undefined || instancePath === undefined) {
+          return;
+        }
+        return { data, instancePath };
+      })
+      .filter(
+        (
+          item
+        ): item is {
+          data: InstanceTransferData;
+          instancePath: NonNullable<ReturnType<typeof getInstancePath>>;
+        } => item !== undefined
+      );
+    if (selectedPaths.length === 0) {
+      return;
+    }
+    const selectedPathData = selectedPaths.map(({ data }) => data);
+    if (selectedPathData.length < selectedInstanceSelectors.length) {
+      reportSkippedSelectedInstances("cut");
+    }
+    const clipboardData = stringifyMultiRootSelection(selectedPathData);
+    for (const { instancePath } of sortInstancePathsForChildMutation(
+      selectedPaths
+    )) {
+      deleteInstanceBySelector(instancePath[0].instanceSelector);
+    }
+    clearInstanceSelection();
+    return clipboardData;
+  }
+
   const instancePath = $selectedInstancePath.get();
   if (instancePath === undefined) {
     return;
@@ -229,25 +388,23 @@ const onCut = () => {
   if (data === undefined) {
     return;
   }
-  updateWebstudioData((data) => {
-    deleteInstanceMutable(data, instancePath);
-  });
+  deleteInstanceBySelector(instancePath[0].instanceSelector);
   if (data === undefined) {
     return;
   }
   return stringify(data);
 };
 
-export const instanceText: Plugin = {
+export const instanceText = {
   name: "instance-text",
   mimeType: "text/plain",
-  onCopy,
-  onCut,
-  onPaste,
-};
+  onCopy: handleCopyInstance,
+  onCut: handleCutInstance,
+  onPaste: handlePasteInstance,
+} satisfies Plugin;
 
-export const instanceJson: Plugin = {
+export const instanceJson = {
   name: "instance-json",
   mimeType: "application/json",
-  onPaste,
-};
+  onPaste: handlePasteInstance,
+} satisfies Plugin;

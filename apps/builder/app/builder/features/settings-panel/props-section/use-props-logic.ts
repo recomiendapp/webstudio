@@ -1,8 +1,22 @@
-import { nanoid } from "nanoid";
-import { computed } from "nanostores";
 import { useStore } from "@nanostores/react";
-import type { PropMeta, Instance, Prop } from "@webstudio-is/sdk";
+import type {
+  PropMeta,
+  Instance,
+  Prop,
+  Props,
+  WsComponentMeta,
+} from "@webstudio-is/sdk";
 import { descendantComponent } from "@webstudio-is/sdk";
+import {
+  canHaveTextContent,
+  createStartingPropValueFromMeta,
+  getDefaultPropMetaForType,
+  getContentModeCapabilities,
+  isRichText,
+  isRichTextTree,
+  showAttributeMeta,
+  type ContentModeCapabilities,
+} from "@webstudio-is/project-build/runtime";
 import {
   reactPropsToStandardAttributes,
   showAttribute,
@@ -10,20 +24,19 @@ import {
   textContentAttribute,
 } from "@webstudio-is/react-sdk";
 import {
-  $instances,
   $isContentMode,
-  $props,
   $registeredComponentMetas,
 } from "~/shared/nano-states";
-import { isRichText } from "~/shared/content-model";
-import { $selectedInstance, $selectedInstancePath } from "~/shared/awareness";
+import { $instances } from "~/shared/sync/data-stores";
+import { $props } from "~/shared/sync/data-stores";
+import { $styleSources } from "~/shared/sync/data-stores";
+import { $selectedInstancePath } from "~/shared/nano-states";
 import {
   $selectedInstanceInitialPropNames,
   $selectedInstancePropsMetas,
-  showAttributeMeta,
   type PropValue,
 } from "../shared";
-import { $instanceTags } from "../../style-panel/shared/model";
+import { getEditableTextTarget } from "@webstudio-is/project-build/runtime";
 
 type PropOrName = { prop?: Prop; propName: string };
 
@@ -31,109 +44,57 @@ export type PropAndMeta = {
   prop?: Prop;
   propName: string;
   meta: PropMeta;
+  instanceId?: Instance["id"];
+  instanceSelector?: Instance["id"][];
 };
 
-// The value we set prop to when it's added
-//
-// If undefined is returned,
-// we will not add a prop in storage until we get an onChange from control.
-//
-// User may have this experience:
-//   - they added a prop but didn't touch the control
-//   - they closed props panel
-//   - when they open props panel again, the prop is not there
-//
-// We want to avoid this if possible, but for some types like "asset" we can't
-const getStartingValue = (
-  meta: PropMeta,
-  defaultBooleanValue: boolean
-): PropValue | undefined => {
-  if (meta.type === "string" && meta.control !== "file") {
-    return {
-      type: "string",
-      value: meta.defaultValue ?? "",
-    };
+const isPropVisibleInContentMode = ({
+  propName,
+  props,
+  propsMetas,
+  selectedInstanceSelector,
+  capabilities,
+}: {
+  propName: string;
+  props: Prop[];
+  propsMetas: Map<string, PropMeta>;
+  selectedInstanceSelector: undefined | Instance["id"][];
+  capabilities: ContentModeCapabilities;
+}) => {
+  if (
+    selectedInstanceSelector === undefined ||
+    capabilities.editableInstanceIds.has(selectedInstanceSelector[0]) === false
+  ) {
+    return false;
   }
-
-  if (meta.type === "number") {
-    return {
-      type: "number",
-      value: meta.defaultValue ?? 0,
-    };
+  if (propName === textContentAttribute) {
+    return true;
   }
-
-  if (meta.type === "boolean") {
-    return {
-      type: "boolean",
-      value: meta.defaultValue ?? defaultBooleanValue,
-    };
+  if (
+    props.some(
+      (prop) =>
+        prop.name === propName && capabilities.editablePropIds.has(prop.id)
+    )
+  ) {
+    return true;
   }
-
-  if (meta.type === "string[]") {
-    return {
-      type: "string[]",
-      value: meta.defaultValue ?? [],
-    };
+  const propMeta = propsMetas.get(propName);
+  if (propMeta?.type === "string" && propMeta.control === "file") {
+    return true;
   }
-
-  if (meta.type === "action") {
-    return {
-      type: "action",
-      value: [],
-    };
-  }
-};
-
-const getDefaultMetaForType = (type: Prop["type"]): PropMeta => {
-  switch (type) {
-    case "action":
-      return { type: "action", control: "action", required: false };
-    case "string":
-      return { type: "string", control: "text", required: false };
-    case "number":
-      return { type: "number", control: "number", required: false };
-    case "boolean":
-      return { type: "boolean", control: "boolean", required: false };
-    case "asset":
-      return { type: "string", control: "file", required: false };
-    case "page":
-      return { type: "string", control: "url", required: false };
-    case "string[]":
-      throw new Error(
-        "A prop with type string[] must have a meta, we can't provide a default one because we need a list of options"
-      );
-
-    case "animationAction":
-      return {
-        type: "animationAction",
-        control: "animationAction",
-        required: false,
-      };
-    case "json":
-      throw new Error(
-        "A prop with type json must have a meta, we can't provide a default one because we need a list of options"
-      );
-    case "expression":
-      throw new Error(
-        "A prop with type expression must have a meta, we can't provide a default one because we need a list of options"
-      );
-    case "parameter":
-      throw new Error(
-        "A prop with type parameter must have a meta, we can't provide a default one because we need a list of options"
-      );
-    case "resource":
-      throw new Error(
-        "A prop with type resource must have a meta, we can't provide a default one because we need a list of options"
-      );
-    default:
-      throw new Error(`Usupported data type: ${type satisfies never}`);
-  }
+  return propMeta?.contentMode === true;
 };
 
 type UsePropsLogicInput = {
   instance: Instance;
   props: Prop[];
-  updateProp: (update: Prop) => void;
+  updateProp: (
+    update: PropValue & {
+      instanceId: Instance["id"];
+      name: Prop["name"];
+      required?: boolean;
+    }
+  ) => void;
 };
 
 const getAndDelete = <Value>(map: Map<string, Value>, key: string) => {
@@ -142,36 +103,49 @@ const getAndDelete = <Value>(map: Map<string, Value>, key: string) => {
   return value;
 };
 
-const $canHaveTextContent = computed(
-  [$instances, $props, $registeredComponentMetas, $selectedInstancePath],
-  (instances, props, metas, instancePath) => {
-    if (instancePath === undefined) {
-      return false;
-    }
-    const [{ instanceSelector }] = instancePath;
-    return isRichText({
-      instances,
-      props,
-      metas,
-      instanceSelector,
-    });
+const canShowTextContent = ({
+  instance,
+  instanceSelector,
+  instances,
+  props,
+  metas,
+  isContentMode,
+}: {
+  instance: Instance;
+  instanceSelector: Instance["id"][] | undefined;
+  instances: Map<Instance["id"], Instance>;
+  props: Props;
+  metas: Map<string, WsComponentMeta>;
+  isContentMode: boolean;
+}) => {
+  const target = getEditableTextTarget(instance);
+  if (
+    instanceSelector === undefined ||
+    (instance.children.length > 0 && target === undefined)
+  ) {
+    return false;
   }
-);
-
-const contentModePropertiesByTag: Partial<Record<string, string[]>> = {
-  img: ["src", "width", "height", "alt"],
-  a: ["href"],
+  const input = {
+    instanceId: instanceSelector[0],
+    instances,
+    props,
+    metas,
+  };
+  if (
+    (isContentMode
+      ? isRichTextTree(input)
+      : isRichText({ ...input, instanceSelector })) === true
+  ) {
+    return true;
+  }
+  return canHaveTextContent(input);
 };
 
-const $selectedInstanceTag = computed(
-  [$selectedInstance, $instanceTags],
-  (selectedInstance, instanceTags) => {
-    if (selectedInstance === undefined) {
-      return;
-    }
-    return instanceTags.get(selectedInstance.id);
-  }
-);
+export const __testing__ = {
+  isPropVisibleInContentMode,
+  getAndDelete,
+  canShowTextContent,
+};
 
 /** usePropsLogic expects that key={instanceId} is used on the ancestor component */
 export const usePropsLogic = ({
@@ -180,27 +154,45 @@ export const usePropsLogic = ({
   updateProp,
 }: UsePropsLogicInput) => {
   const isContentMode = useStore($isContentMode);
-  const selectedInstanceTag = useStore($selectedInstanceTag);
+  const propsMetas = useStore($selectedInstancePropsMetas);
+  const instances = useStore($instances);
+  const allProps = useStore($props);
+  const styleSources = useStore($styleSources);
+  const metas = useStore($registeredComponentMetas);
+  const selectedInstancePath = useStore($selectedInstancePath);
+  const contentModeCapabilities = isContentMode
+    ? getContentModeCapabilities({
+        instances,
+        metas,
+        props: allProps,
+        styleSources,
+      })
+    : undefined;
 
   /**
-   * In content edit mode we show only Image and Link props
+   * In content edit mode we show only props marked with contentMode: true
    * In the future I hope the only thing we will show will be Components
    */
   const isPropVisible = (propName: string) => {
     if (!isContentMode) {
       return true;
     }
-    const allowedProperties =
-      contentModePropertiesByTag[selectedInstanceTag ?? ""] ?? [];
-    return allowedProperties.includes(propName);
+    if (contentModeCapabilities === undefined) {
+      return false;
+    }
+    return isPropVisibleInContentMode({
+      propName,
+      props,
+      propsMetas,
+      selectedInstanceSelector: selectedInstancePath?.[0].instanceSelector,
+      capabilities: contentModeCapabilities,
+    });
   };
 
   const savedProps = props;
 
   // we will delete items from these maps as we categorize the props
   const unprocessedSaved = new Map(savedProps.map((prop) => [prop.name, prop]));
-
-  const propsMetas = useStore($selectedInstancePropsMetas);
 
   const initialPropNames = useStore($selectedInstanceInitialPropNames);
 
@@ -216,20 +208,54 @@ export const usePropsLogic = ({
     });
   }
 
-  const canHaveTextContent = useStore($canHaveTextContent);
+  const getTextContentTarget = () => {
+    if (
+      canShowTextContent({
+        instance,
+        instanceSelector: selectedInstancePath?.[0].instanceSelector,
+        instances,
+        props: allProps,
+        metas,
+        isContentMode,
+      })
+    ) {
+      return {
+        instanceId: instance.id,
+        instanceSelector: selectedInstancePath?.[0].instanceSelector,
+      };
+    }
 
-  const hasNoChildren = instance.children.length === 0;
-  const hasOnlyTextChild =
-    instance.children.length === 1 && instance.children[0].type === "text";
-  const hasOnlyExpressionChild =
-    instance.children.length === 1 &&
-    instance.children[0].type === "expression";
-  if (
-    canHaveTextContent &&
-    (hasNoChildren || hasOnlyTextChild || hasOnlyExpressionChild)
-  ) {
+    if (isContentMode && instance.component === "Link") {
+      const [child] = instance.children;
+      if (child?.type === "id") {
+        const childInstance = instances.get(child.value);
+        if (
+          childInstance?.component === "Text" &&
+          (childInstance.children.length === 0 ||
+            getEditableTextTarget(childInstance) !== undefined)
+        ) {
+          return {
+            instanceId: childInstance.id,
+            instanceSelector:
+              selectedInstancePath === undefined
+                ? undefined
+                : [
+                    childInstance.id,
+                    ...selectedInstancePath[0].instanceSelector,
+                  ],
+          };
+        }
+      }
+    }
+  };
+
+  const textContentTarget = getTextContentTarget();
+
+  if (textContentTarget) {
     systemProps.push({
       propName: textContentAttribute,
+      instanceId: textContentTarget.instanceId,
+      instanceSelector: textContentTarget.instanceSelector,
       meta: {
         required: false,
         control: "textContent",
@@ -258,21 +284,13 @@ export const usePropsLogic = ({
 
     // For initial props, if prop is not saved, we want to show default value if available.
     //
-    // Important to not use infer stating value if default is not available
-    // beacuse user may have this experience:
+    // Important to not infer starting value if default is not available
+    // because user may have this experience:
     //   - they open props panel of an Image
     //   - they see 0 in the control for "width"
     //   - where 0 is a fallback when no default is available
     //   - they think that width is set to 0, but it's actually not set at all
     //
-    if (prop === undefined && propMeta.defaultValue !== undefined) {
-      // initial properties are not defined but suggested to default so default boolean is false
-      const value = getStartingValue(propMeta, false);
-      if (value) {
-        prop = { id: nanoid(), instanceId: instance.id, name, ...value };
-      }
-    }
-
     initialProps.push({
       prop,
       propName: name,
@@ -294,7 +312,9 @@ export const usePropsLogic = ({
       propMeta = propsMetas.get(name);
     }
     prop = { ...prop, name };
-    propMeta ??= getDefaultMetaForType("string");
+    propMeta ??= getDefaultPropMetaForType(
+      prop.type === "asset" ? "asset" : "string"
+    );
 
     addedProps.push({
       prop,
@@ -306,11 +326,10 @@ export const usePropsLogic = ({
   const handleAdd = (propName: string) => {
     // In case of custom property/attribute we get a string.
     const propMeta =
-      propsMetas.get(propName) ?? getDefaultMetaForType("string");
-    const value = getStartingValue(propMeta, true);
+      propsMetas.get(propName) ?? getDefaultPropMetaForType("string");
+    const value = createStartingPropValueFromMeta(propMeta, true);
     if (value) {
       updateProp({
-        id: nanoid(),
         instanceId: instance.id,
         name: propName,
         ...value,
@@ -319,21 +338,23 @@ export const usePropsLogic = ({
   };
 
   const handleChange = ({ prop, propName }: PropOrName, value: PropValue) => {
-    updateProp(
-      prop === undefined
-        ? { id: nanoid(), instanceId: instance.id, name: propName, ...value }
-        : { ...prop, ...value }
-    );
+    updateProp({
+      instanceId: instance.id,
+      name: propName,
+      required: prop?.required,
+      ...value,
+    });
   };
 
   const handleChangeByPropName = (propName: string, value: PropValue) => {
     const prop = props.find((prop) => prop.name === propName);
 
-    updateProp(
-      prop === undefined
-        ? { id: nanoid(), instanceId: instance.id, name: propName, ...value }
-        : { ...prop, ...value }
-    );
+    updateProp({
+      instanceId: instance.id,
+      name: propName,
+      required: prop?.required,
+      ...value,
+    });
   };
 
   return {
@@ -341,7 +362,7 @@ export const usePropsLogic = ({
     handleChange,
     handleChangeByPropName,
     /** Similar to Initial, but displayed as a separate group in UI etc.
-     * Currentrly used only for the ID prop. */
+     * Currently used only for the ID prop. */
     systemProps: systemProps.filter(({ propName }) => isPropVisible(propName)),
     /** Initial (not deletable) props */
     initialProps: initialProps.filter(({ propName }) =>

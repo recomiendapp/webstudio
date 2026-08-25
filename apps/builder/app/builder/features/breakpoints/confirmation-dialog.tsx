@@ -26,7 +26,7 @@ export const ConfirmationDialog = ({
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onAbort()}>
       <DialogContent>
-        <DialogTitle>Delete Breakpoint</DialogTitle>
+        <DialogTitle>Delete breakpoint</DialogTitle>
         <Flex gap="2" direction="column" css={{ padding: theme.spacing[5] }}>
           <Text>{`Are you sure you want to delete "${breakpoint.label}"?`}</Text>
           <Text>
@@ -35,11 +35,11 @@ export const ConfirmationDialog = ({
           </Text>
         </Flex>
         <DialogActions>
+          <Button autoFocus onClick={onConfirm} color="destructive">
+            Delete
+          </Button>
           <Button color="neutral" onClick={onAbort}>
             Cancel
-          </Button>
-          <Button onClick={onConfirm} color="destructive">
-            Delete
           </Button>
         </DialogActions>
       </DialogContent>

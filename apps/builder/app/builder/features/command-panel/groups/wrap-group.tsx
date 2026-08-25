@@ -13,23 +13,19 @@ import {
 import { matchSorter } from "match-sorter";
 import { computed } from "nanostores";
 import { elementComponent, tags } from "@webstudio-is/sdk";
-import type {
-  Instance,
-  Instances,
-  Props,
-  WsComponentMeta,
-} from "@webstudio-is/sdk";
 import {
-  $instances,
-  $props,
+  $propsIndex,
   $registeredComponentMetas,
+  $selectedInstancePath,
+  $selectedPage,
 } from "~/shared/nano-states";
-import { $selectedInstancePath } from "~/shared/awareness";
+import { $instances } from "~/shared/sync/data-stores";
+import { $props } from "~/shared/sync/data-stores";
 import {
   getInstanceLabel,
   InstanceIcon,
 } from "~/builder/shared/instance-label";
-import { isTreeSatisfyingContentModel } from "~/shared/content-model";
+import { canWrapInstance } from "@webstudio-is/project-build/runtime";
 import {
   $commandContent,
   $isCommandPanelOpen,
@@ -37,7 +33,8 @@ import {
   openCommandPanel,
 } from "../command-state";
 import { useState } from "react";
-import { wrapInstance } from "~/shared/instance-utils";
+import { wrapInstance } from "~/shared/instance-utils/mutation";
+import { allowsHtmlMutations } from "../shared/document-utils";
 
 type WrapOption = {
   component: string;
@@ -60,101 +57,33 @@ const wrapperComponentNames = [
   "Form",
 ];
 
-// Check if an instance can be wrapped with a specific component or tag
-const canWrapInstance = (
-  selectedInstanceId: string,
-  selectedInstanceSelector: string[],
-  parentInstanceId: string,
-  component: string,
-  tag: string | undefined,
-  instances: Instances,
-  props: Props,
-  metas: Map<Instance["component"], WsComponentMeta>
-): boolean => {
-  const selectedInstance = instances.get(selectedInstanceId);
-  const parentInstance = instances.get(parentInstanceId);
-
-  if (!selectedInstance || !parentInstance) {
-    return false;
-  }
-
-  const wrapperInstance: Instance = {
-    type: "instance",
-    id: "wrapper_instance",
-    component,
-    children: [{ type: "id", value: selectedInstanceId }],
-  };
-
-  if (tag || component === elementComponent) {
-    wrapperInstance.tag = tag ?? "div";
-  } else {
-    // For components with presetStyle (like Heading, Box), infer default tag
-    const meta = metas.get(component);
-    const defaultTag = Object.keys(
-      (meta as { presetStyle?: Record<string, unknown> })?.presetStyle ?? {}
-    ).at(0);
-    if (defaultTag) {
-      wrapperInstance.tag = defaultTag;
-    }
-  }
-
-  const newInstances = new Map(instances);
-  newInstances.set(wrapperInstance.id, wrapperInstance);
-
-  // Update parent to point to wrapper
-  const newParentInstance = { ...parentInstance };
-  newParentInstance.children = parentInstance.children.map((child) => {
-    if (child.type === "id" && child.value === selectedInstanceId) {
-      return { type: "id", value: wrapperInstance.id };
-    }
-    return child;
-  });
-  newInstances.set(parentInstance.id, newParentInstance);
-
-  // Validate the wrapper in the parent
-  const wrapperValid = isTreeSatisfyingContentModel({
-    instances: newInstances,
-    props,
-    metas,
-    instanceSelector: [
-      wrapperInstance.id,
-      ...selectedInstanceSelector.slice(1),
-    ],
-  });
-
-  if (!wrapperValid) {
-    return false;
-  }
-
-  // Validate the selected instance inside the wrapper
-  const childValid = isTreeSatisfyingContentModel({
-    instances: newInstances,
-    props,
-    metas,
-    instanceSelector: [
-      selectedInstanceId,
-      wrapperInstance.id,
-      ...selectedInstanceSelector.slice(1),
-    ],
-  });
-
-  return childValid;
-};
-
 const $wrapOptions = computed(
   [
     $isCommandPanelOpen,
     $selectedInstancePath,
     $instances,
     $props,
+    $propsIndex,
     $registeredComponentMetas,
+    $selectedPage,
   ],
-  (isOpen, instancePath, instances, props, metas) => {
+  (
+    isCommandPanelOpen,
+    instancePath,
+    instances,
+    props,
+    propsIndex,
+    metas,
+    selectedPage
+  ) => {
     const wrapOptions: WrapOption[] = [];
-    if (!isOpen) {
+    if (isCommandPanelOpen === false) {
       return wrapOptions;
     }
     if (instancePath === undefined || instancePath.length === 1) {
+      return wrapOptions;
+    }
+    if (!allowsHtmlMutations(selectedPage)) {
       return wrapOptions;
     }
     const [selectedItem, parentItem] = instancePath;
@@ -189,7 +118,8 @@ const $wrapOptions = computed(
           undefined,
           instances,
           props,
-          metas
+          metas,
+          propsIndex.htmlTagsByInstanceId
         )
       ) {
         const meta = metas.get(component);
@@ -214,7 +144,8 @@ const $wrapOptions = computed(
           tag,
           instances,
           props,
-          metas
+          metas,
+          propsIndex.htmlTagsByInstanceId
         )
       ) {
         const label = getInstanceLabel({ component: elementComponent, tag });
@@ -304,8 +235,4 @@ const WrapComponentsList = () => {
 export const showWrapComponentsList = () => {
   openCommandPanel();
   $commandContent.set(<WrapComponentsList />);
-};
-
-export const __testing__ = {
-  canWrapInstance,
 };

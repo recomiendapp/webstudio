@@ -8,14 +8,21 @@ export type TemplateStyleDecl = {
   value: StyleValue;
 };
 
+export const parseTemplateCss = (source: string): TemplateStyleDecl[] => {
+  const cssString = `.styles{ ${source} }`;
+  const styles: TemplateStyleDecl[] = [];
+  for (const { breakpoint, state, property, value } of parseCss(
+    cssString,
+    new Map()
+  ).styles) {
+    styles.push({ breakpoint, state, property: property, value });
+  }
+  return styles;
+};
+
 export const css = (
   strings: TemplateStringsArray,
   ...values: string[]
 ): TemplateStyleDecl[] => {
-  const cssString = `.styles{ ${String.raw({ raw: strings }, ...values)} }`;
-  const styles: TemplateStyleDecl[] = [];
-  for (const { breakpoint, state, property, value } of parseCss(cssString)) {
-    styles.push({ breakpoint, state, property: property, value });
-  }
-  return styles;
+  return parseTemplateCss(String.raw({ raw: strings }, ...values));
 };
