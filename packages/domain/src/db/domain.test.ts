@@ -119,6 +119,8 @@ describe("create — domain limit guard (msw)", () => {
       db.head("Domain", () => empty({ headers: { "Content-Range": "*/0" } })),
       // upsert into Domain (ignoreDuplicates)
       db.post("Domain", () => empty({ status: 204 })),
+      // fork: force ACTIVE + txtRecord so the domain is auto-verified
+      db.patch("Domain", () => empty({ status: 204 })),
       // fetch domain id after upsert
       db.get("Domain", () => json({ id: "domain-id-1" })),
       // insert into ProjectDomain
@@ -164,6 +166,7 @@ describe("create — domain limit guard (msw)", () => {
       ),
       db.head("Domain", () => empty({ headers: { "Content-Range": "*/1" } })),
       db.post("Domain", () => empty({ status: 204 })),
+      db.patch("Domain", () => empty({ status: 204 })),
       db.get("Domain", () => json({ id: "domain-id-1" })),
       db.post("ProjectDomain", () => {
         projectDomainInserted = true;
