@@ -488,15 +488,6 @@ const Publish = ({
   const [hasCustomDomainsSelected, setHasCustomDomainsSelected] =
     useState(false);
   const countdown = usePublishCountdown(isPublishing);
-  const authToken = useStore($authToken);
-  const {
-    data,
-    load,
-    state: loadState,
-  } = trpcClient.authorizationToken.findMany.useQuery();
-  const { send: createToken, state: createState } =
-    trpcClient.authorizationToken.create.useMutation();
-  const [links, setLinks] = useState(data ?? []);
 
   useEffect(() => {
     const form = buttonRef.current?.closest("form");
