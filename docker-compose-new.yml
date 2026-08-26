@@ -24,18 +24,21 @@ services:
       # Plans/features: FEATURES, USER_PLAN y MAX_ASSETS_PER_PROJECT fueron
       # reemplazados por PLANS (JSON) y FEATURE_FLAGS en el upstream.
       # PLANS define un array de planes; maxAssetsPerProject vive dentro de cada plan.
-      PLANS: '${PLANS}'
-      FEATURE_FLAGS: '${FEATURE_FLAGS}'
-      MAX_UPLOAD_SIZE: '${MAX_UPLOAD_SIZE}'
-      DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT}'
+      # IMPORTANTE: PLANS debe ser JSON valido. Si la variable no esta definida
+      # en el .env, el compose la expandiria a "" y el builder fallaria al arrancar,
+      # por eso usamos el default "[]".
+      PLANS: '${PLANS:-[]}'
+      FEATURE_FLAGS: '${FEATURE_FLAGS:-}'
+      MAX_UPLOAD_SIZE: '${MAX_UPLOAD_SIZE:-}'
+      DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT:-}'
       # OAuth entre proyectos (obligatorio si DEPLOYMENT_ENVIRONMENT=production)
-      AUTH_WS_CLIENT_ID: '${AUTH_WS_CLIENT_ID}'
-      AUTH_WS_CLIENT_SECRET: '${AUTH_WS_CLIENT_SECRET}'
+      AUTH_WS_CLIENT_ID: '${AUTH_WS_CLIENT_ID:-}'
+      AUTH_WS_CLIENT_SECRET: '${AUTH_WS_CLIENT_SECRET:-}'
       # Deployment server AWS (publicación real). Si se omiten, se usa el stub local.
-      TRPC_SERVER_URL: '${TRPC_SERVER_URL}'
-      TRPC_SERVER_API_TOKEN: '${TRPC_SERVER_API_TOKEN}'
+      TRPC_SERVER_URL: '${TRPC_SERVER_URL:-}'
+      TRPC_SERVER_API_TOKEN: '${TRPC_SERVER_API_TOKEN:-}'
       # Host bajo el que se publican los proyectos (wildcard SSL)
-      PUBLISHER_HOST: '${PUBLISHER_HOST}'
+      PUBLISHER_HOST: '${PUBLISHER_HOST:-}'
     volumes:
       - webstudio_assets:/app/apps/builder/public/cgi/asset/
     labels:
