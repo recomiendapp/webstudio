@@ -55,7 +55,8 @@ ENV TRUST_PROXY=true
 ENV PROTOCOL=https
 ENV NODE_ENV=production 
 ENV HOST=0.0.0.0 
-ENV PORT=3001
+# Must match traefik loadbalancer.server.port in docker-compose (3000)
+ENV PORT=3000
 ENV PUBLIC_URL=https://builder.recomiend.app
 ENV APP_URL=https://builder.recomiend.app
 
