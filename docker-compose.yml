@@ -21,11 +21,18 @@ services:
       PUBLIC_URL: 'https://builderstaging.recomiend.app'
       COOKIE_DOMAIN: '.builderstaging.recomiend.app' # Punto inicial obligatorio
       # -----------------------------------------------------------
-      FEATURES: '${FEATURES}'
-      USER_PLAN: '${USER_PLAN}'
-      MAX_ASSETS_PER_PROJECT: '${MAX_ASSETS_PER_PROJECT}'
-      MAX_UPLOAD_SIZE: '${MAX_UPLOAD_SIZE}'
-      DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT}'
+      # Plans/features: FEATURES, USER_PLAN y MAX_ASSETS_PER_PROJECT fueron
+      # reemplazados por PLANS (JSON) y FEATURE_FLAGS en el upstream.
+      # PLANS debe ser JSON valido; default "[]" para no romper el arranque.
+      PLANS: '${PLANS:-[]}'
+      FEATURE_FLAGS: '${FEATURE_FLAGS:-}'
+      MAX_UPLOAD_SIZE: '${MAX_UPLOAD_SIZE:-}'
+      DEPLOYMENT_ENVIRONMENT: '${DEPLOYMENT_ENVIRONMENT:-}'
+      AUTH_WS_CLIENT_ID: '${AUTH_WS_CLIENT_ID:-}'
+      AUTH_WS_CLIENT_SECRET: '${AUTH_WS_CLIENT_SECRET:-}'
+      TRPC_SERVER_URL: '${TRPC_SERVER_URL:-}'
+      TRPC_SERVER_API_TOKEN: '${TRPC_SERVER_API_TOKEN:-}'
+      PUBLISHER_HOST: '${PUBLISHER_HOST:-}'
     volumes:
       - webstudio_assets:/app/apps/builder/public/cgi/asset/
     labels:

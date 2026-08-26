@@ -42,6 +42,17 @@ if [ -z "${SSR_ENTRY}" ] || [ ! -f "${SSR_ENTRY}" ]; then
 fi
  
 echo "Using server entry: ${SSR_ENTRY}"
+
+# (3) Normalize env vars that the builder validates strictly.
+# The builder requires PLANS to be valid JSON. Coolify (or an empty compose
+# expansion) may inject PLANS as an empty string, which fails JSON.parse and
+# crashes startup. Default it to "[]" when unset or empty.
+if [ -z "${PLANS}" ]; then
+  echo "PLANS is empty; defaulting to []"
+  export PLANS="[]"
+fi
+# FEATURE_FLAGS defaults to an empty string in the schema, so leave as-is if unset.
+
 # A esto (añadiendo el puerto explícitamente):
 echo "Starting remix-server on port ${PORT:-3001}"
 exec pnpm --filter "${WS_NAME}" exec remix-serve "${SSR_ENTRY}"
