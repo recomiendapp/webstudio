@@ -197,7 +197,6 @@ export const publishProject = async (
       canCopy: boolean;
       canClone: boolean;
       canPublish: boolean;
-      canUseApi: boolean;
       projectId: string;
       createdAt: string;
     }>;

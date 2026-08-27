@@ -570,7 +570,6 @@ const Publish = ({
       canCopy: Boolean(token.canCopy),
       canClone: Boolean(token.canClone),
       canPublish: Boolean(token.canPublish),
-      canUseApi: Boolean(token.canUseApi),
       projectId: project.id,
       createdAt: String(token.createdAt ?? new Date().toISOString()),
     }));

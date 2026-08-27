@@ -78,7 +78,6 @@ export const domainRouter = router({
                 canCopy: z.boolean(),
                 canClone: z.boolean(),
                 canPublish: z.boolean(),
-                canUseApi: z.boolean(),
                 projectId: z.string(),
                 createdAt: z.string(),
               })

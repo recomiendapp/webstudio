@@ -27,7 +27,6 @@ export const publishInput = z.object({
         canCopy: z.boolean(),
         canClone: z.boolean(),
         canPublish: z.boolean(),
-        canUseApi: z.boolean(),
         projectId: z.string(),
         createdAt: z.string(),
       })
