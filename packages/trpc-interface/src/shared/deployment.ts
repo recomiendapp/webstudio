@@ -13,6 +13,26 @@ export const publishInput = z.object({
   branchName: z.string(),
   // action log helper (not used for deployment, but for action logs readablity)
   logProjectName: z.string(),
+
+  // Fork: our custom AWS deployment server needs these to know what/where to
+  // publish and which access links (tokens) to expose.
+  projectId: z.string().optional(),
+  domains: z.array(z.string()).optional(),
+  links: z
+    .array(
+      z.object({
+        token: z.string(),
+        name: z.string(),
+        relation: z.string(),
+        canCopy: z.boolean(),
+        canClone: z.boolean(),
+        canPublish: z.boolean(),
+        canUseApi: z.boolean(),
+        projectId: z.string(),
+        createdAt: z.string(),
+      })
+    )
+    .optional(),
 });
 
 export const unpublishInput = z.object({

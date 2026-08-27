@@ -68,6 +68,22 @@ export const domainRouter = router({
           projectId: z.string(),
           domains: z.array(z.string()),
           destination: z.literal("saas"),
+          // Fork: access links (tokens) forwarded to the deployment server
+          links: z
+            .array(
+              z.object({
+                token: z.string(),
+                name: z.string(),
+                relation: z.string(),
+                canCopy: z.boolean(),
+                canClone: z.boolean(),
+                canPublish: z.boolean(),
+                canUseApi: z.boolean(),
+                projectId: z.string(),
+                createdAt: z.string(),
+              })
+            )
+            .optional(),
         }),
         z.object({
           projectId: z.string(),
@@ -81,7 +97,7 @@ export const domainRouter = router({
         if (input.destination === "saas") {
           const project = await projectApi.loadById(input.projectId, ctx);
           const domains = getVerifiedPublishDomains(project, input.domains);
-          await publishProject({ project, domains }, ctx);
+          await publishProject({ project, domains, links: input.links }, ctx);
           return { success: true as const };
         }
 

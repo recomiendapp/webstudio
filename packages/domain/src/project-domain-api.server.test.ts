@@ -184,6 +184,10 @@ test("publishes saas project through shared domain service", async () => {
     branchName: "main",
     destination: "saas",
     logProjectName: "Project One - project-1",
+    // Fork: forwarded to the custom deployment server
+    projectId: "project-1",
+    domains: ["project.wstd.io", "example.com"],
+    links: [],
   });
 });
 

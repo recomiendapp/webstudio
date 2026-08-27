@@ -489,6 +489,13 @@ const Publish = ({
     useState(false);
   const countdown = usePublishCountdown(isPublishing);
 
+  // Fork: the custom AWS deployment server requires access links (tokens).
+  // Load existing project tokens and create a viewer token on demand.
+  const { load: loadTokens } =
+    trpcClient.authorizationToken.findMany.useQuery();
+  const { send: createToken } =
+    trpcClient.authorizationToken.create.useMutation();
+
   useEffect(() => {
     const form = buttonRef.current?.closest("form");
 
@@ -531,10 +538,48 @@ const Publish = ({
   }, [project.domain]);
 
   const publish = async (domains: string[]) => {
+    // Fork: gather access links (tokens) for the custom deployment server.
+    // Load existing tokens; if none, create a viewer token.
+    const loadProjectTokens = () =>
+      new Promise<Array<Record<string, unknown>>>((resolve) => {
+        loadTokens({ projectId: project.id }, (data) =>
+          resolve((data as Array<Record<string, unknown>>) ?? [])
+        );
+      });
+
+    const createViewerToken = () =>
+      new Promise<Record<string, unknown> | undefined>((resolve) => {
+        createToken(
+          { projectId: project.id, relation: "viewers", name: "Deploy link" },
+          (result) => resolve(result as Record<string, unknown> | undefined)
+        );
+      });
+
+    let tokens = await loadProjectTokens();
+    if (tokens.length === 0) {
+      const created = await createViewerToken();
+      if (created != null) {
+        tokens = [created];
+      }
+    }
+
+    const links = tokens.map((token) => ({
+      token: String(token.token ?? ""),
+      name: String(token.name ?? ""),
+      relation: String(token.relation ?? "viewers"),
+      canCopy: Boolean(token.canCopy),
+      canClone: Boolean(token.canClone),
+      canPublish: Boolean(token.canPublish),
+      canUseApi: Boolean(token.canUseApi),
+      projectId: project.id,
+      createdAt: String(token.createdAt ?? new Date().toISOString()),
+    }));
+
     const publishResult = await nativeClient.domain.publish.mutate({
       projectId: project.id,
       domains,
       destination: "saas",
+      links,
     });
 
     if (publishResult.success === false) {

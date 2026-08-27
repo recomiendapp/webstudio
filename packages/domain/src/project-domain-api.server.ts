@@ -185,9 +185,22 @@ export const publishProject = async (
   {
     project,
     domains,
+    links,
   }: {
     project: LoadedProject;
     domains: string[];
+    // Fork: access links (tokens) forwarded to our custom deployment server
+    links?: Array<{
+      token: string;
+      name: string;
+      relation: string;
+      canCopy: boolean;
+      canClone: boolean;
+      canPublish: boolean;
+      canUseApi: boolean;
+      projectId: string;
+      createdAt: string;
+    }>;
   },
   context: AppContext
 ) => {
@@ -211,6 +224,10 @@ export const publishProject = async (
     branchName: env.GITHUB_REF_NAME,
     destination: "saas",
     logProjectName: `${project.title} - ${project.id}`,
+    // Fork: forwarded so the custom AWS deployment server can publish
+    projectId: project.id,
+    domains,
+    links: links ?? [],
   });
 
   const deploymentNotImplemented =
