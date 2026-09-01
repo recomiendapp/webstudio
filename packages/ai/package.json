@@ -1,0 +1,28 @@
+{
+  "name": "@webstudio-is/ai",
+  "version": "0.0.0",
+  "description": "Webstudio in-app AI engine (Amazon Bedrock)",
+  "author": "Webstudio <github@webstudio.is>",
+  "homepage": "https://webstudio.is",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1123.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@webstudio-is/tsconfig": "workspace:*",
+    "vitest": "^3.1.2"
+  },
+  "exports": {
+    "./index.server": {
+      "webstudio": "./src/index.server.ts"
+    }
+  },
+  "license": "AGPL-3.0-or-later",
+  "private": true,
+  "sideEffects": false
+}

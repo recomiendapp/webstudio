@@ -81,6 +81,15 @@ const environment = z.object({
   VERCEL: z.string().optional(),
   VERCEL_ENV: z.enum(["development", "preview", "production"]).optional(),
   VERCEL_URL: z.string().optional(),
+
+  // In-app AI engine (Amazon Bedrock)
+  AI_ENABLED: z.string().optional(),
+  AI_MAX_TURNS: z
+    .string()
+    .optional()
+    .transform((val) => (val ? parseInt(val, 10) : 12)),
+  BEDROCK_REGION: z.string().optional(),
+  BEDROCK_MODEL_ID: z.string().optional(),
 });
 
 const rawEnv = {
@@ -121,6 +130,10 @@ const rawEnv = {
   VERCEL: process.env.VERCEL,
   VERCEL_ENV: process.env.VERCEL_ENV,
   VERCEL_URL: process.env.VERCEL_URL,
+  AI_ENABLED: process.env.AI_ENABLED,
+  AI_MAX_TURNS: process.env.AI_MAX_TURNS,
+  BEDROCK_REGION: process.env.BEDROCK_REGION,
+  BEDROCK_MODEL_ID: process.env.BEDROCK_MODEL_ID,
 };
 
 const parseResult = environment.safeParse(rawEnv);

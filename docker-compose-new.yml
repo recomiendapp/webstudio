@@ -39,6 +39,11 @@ services:
       TRPC_SERVER_API_TOKEN: '${TRPC_SERVER_API_TOKEN:-}'
       # Host bajo el que se publican los proyectos (wildcard SSL)
       PUBLISHER_HOST: '${PUBLISHER_HOST:-}'
+      # Motor de IA in-app (Amazon Bedrock). Usa el IAM role del contenedor.
+      AI_ENABLED: '${AI_ENABLED:-}'
+      AI_MAX_TURNS: '${AI_MAX_TURNS:-}'
+      BEDROCK_REGION: '${BEDROCK_REGION:-}'
+      BEDROCK_MODEL_ID: '${BEDROCK_MODEL_ID:-}'
     volumes:
       - webstudio_assets:/app/apps/builder/public/cgi/asset/
     labels:
