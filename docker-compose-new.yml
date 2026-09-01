@@ -44,6 +44,14 @@ services:
       AI_MAX_TURNS: '${AI_MAX_TURNS:-}'
       BEDROCK_REGION: '${BEDROCK_REGION:-}'
       BEDROCK_MODEL_ID: '${BEDROCK_MODEL_ID:-}'
+      # Credenciales AWS estandar: el SDK las toma automaticamente de la cadena
+      # de credenciales por defecto (env vars). El usuario/rol necesita el
+      # permiso bedrock:InvokeModel. Si Coolify corre en EC2 con instance
+      # profile, puedes omitirlas y el SDK usara el rol de la instancia.
+      AWS_REGION: '${AWS_REGION:-}'
+      AWS_ACCESS_KEY_ID: '${AWS_ACCESS_KEY_ID:-}'
+      AWS_SECRET_ACCESS_KEY: '${AWS_SECRET_ACCESS_KEY:-}'
+      AWS_SESSION_TOKEN: '${AWS_SESSION_TOKEN:-}'
     volumes:
       - webstudio_assets:/app/apps/builder/public/cgi/asset/
     labels:

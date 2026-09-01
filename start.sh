@@ -53,6 +53,16 @@ if [ -z "${PLANS}" ]; then
 fi
 # FEATURE_FLAGS defaults to an empty string in the schema, so leave as-is if unset.
 
+# Unset empty AWS credential vars so the AWS SDK falls back to its default
+# credential provider chain (instance/task role) instead of trying to use
+# empty strings. Coolify/compose may inject these as "".
+for aws_var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_REGION; do
+  eval "aws_val=\${$aws_var}"
+  if [ -z "${aws_val}" ]; then
+    unset "${aws_var}"
+  fi
+done
+
 # A esto (añadiendo el puerto explícitamente):
 echo "Starting remix-server on port ${PORT:-3001}"
 exec pnpm --filter "${WS_NAME}" exec remix-serve "${SSR_ENTRY}"
